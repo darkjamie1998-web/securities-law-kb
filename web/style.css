@@ -1,0 +1,29 @@
+/* web/style.css — 全局样式（M1 占位版，M4 完整版） */
+:root {
+  --primary: #1a4b8c;
+  --bg: #f7f8fa;
+  --text: #24292f;
+  --border: #d0d7de;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: var(--primary);
+  color: #fff;
+}
+.brand { font-size: 18px; font-weight: 600; }
+.placeholder-hint { font-size: 12px; opacity: 0.8; }
+.placeholder-main {
+  max-width: 720px;
+  margin: 80px auto;
+  text-align: center;
+}
