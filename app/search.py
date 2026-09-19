@@ -1,23 +1,45 @@
 # app/search.py — 混合检索：FTS5 关键词 + 向量余弦，RRF 融合
 import json
+import re
 
 from app.llm import cosine
 
 
+def _split_terms(query: str) -> list[str]:
+    """查询切词：按空白/标点切分，保留 ≥2 字的词（trigram 最小命中单元）。"""
+    terms = [t for t in re.split(r"[\s，。、；：？！·,.:;?!]+", query) if len(t) >= 2]
+    return terms or ([query] if query.strip() else [])
+
+
 def _fts_search(db, query: str, top_k: int = 50) -> list[int]:
-    """FTS5 关键词路：短语匹配。trigram 分词器下中文子串可命中。"""
+    """FTS5 关键词路：整串短语 + 分词 OR 双路查询。
+
+    trigram 分词器下中文子串可命中；整串查不到时按词 OR 匹配。
+    """
     q = query.strip().replace('"', '""')
     if not q:
         return []
-    try:
-        rows = db.execute(
-            'SELECT rowid FROM articles_fts WHERE articles_fts MATCH ? '
-            "ORDER BY rank LIMIT ?",
-            (f'"{q}"', top_k),
-        ).fetchall()
-        return [r[0] for r in rows]
-    except Exception:
-        return []
+    terms = _split_terms(query)
+    # 双路：整串 phrase 优先（更精确），分词 >1 时加 OR 路
+    match_exprs = [f'"{q}"']
+    if len(terms) > 1:
+        match_exprs.append(" OR ".join(f'"{t}"' for t in terms))
+    seen: list[int] = []
+    for expr in match_exprs:
+        try:
+            rows = db.execute(
+                'SELECT rowid FROM articles_fts WHERE articles_fts MATCH ? '
+                "ORDER BY rank LIMIT ?",
+                (expr, top_k),
+            ).fetchall()
+        except Exception:
+            continue
+        for r in rows:
+            if r[0] not in seen:
+                seen.append(r[0])
+        if len(seen) >= top_k:
+            break
+    return seen[:top_k]
 
 
 def _vector_search(db, query_vec: list[float] | None, top_k: int = 50) -> list[int]:
