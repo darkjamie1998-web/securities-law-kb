@@ -70,6 +70,19 @@ def test_no_match_returns_empty(db):
     assert hybrid_search(db, None, "量子计算机检修规范", top_k=5) == []
 
 
+def test_multi_word_query_hits(db):
+    """多词查询（Agent 实际检索形态）：分词 OR 后应命中，而不是整串短语落空。"""
+    results = hybrid_search(db, None, "内幕交易 处罚 规定", top_k=5)
+    assert results, "分词多路匹配应有命中"
+    assert any("内幕" in r["text"] for r in results)
+
+
+def test_multi_word_query_with_unrelated_words(db):
+    """包含无命中词的多词查询：有词命中即返回结果。"""
+    results = hybrid_search(db, None, "内幕信息 量子力学", top_k=5)
+    assert results
+
+
 def test_rrf_fusion_priority():
     a = [1, 2, 3]
     b = [2, 4]

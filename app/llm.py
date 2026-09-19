@@ -30,12 +30,13 @@ class LLMClient:
         self.chat_model = cfg.get("chat_model", "")
         self.embedding_model = cfg.get("embedding_model", "")
         self.temperature = float(cfg.get("temperature", 0.1))
+        self.extra_headers = dict(cfg.get("extra_headers") or {})
         if not self.api_base or not self.api_key:
             raise LLMError("缺少 api_base / api_key，请先在界面配置大模型（PUT /api/settings）")
 
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"}
+                "Content-Type": "application/json", **self.extra_headers}
 
     # ---- chat ----
     def chat(self, messages: list[dict], tools: list | None = None,
@@ -52,7 +53,7 @@ class LLMClient:
             f"{self.api_base}/chat/completions",
             headers=self._headers(),
             json=payload,
-            timeout=120,
+            timeout=300,  # 推理型模型长文生成需要较长时间
         )
         if resp.status_code != 200:
             raise LLMError(f"chat 失败 {resp.status_code}: {resp.text[:300]}")

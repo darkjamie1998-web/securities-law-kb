@@ -170,7 +170,11 @@ def main():
         return
     for lid in ids:
         print(f"[relations] 处理法规 {lid} …", flush=True)
-        print("[relations]", process_law(db, llm, lid))
+        try:
+            print("[relations]", process_law(db, llm, lid))
+        except Exception as e:
+            # 单部法规失败不阻断（如网关内容安全过滤拦截敏感法规原文）
+            print(f"[relations] 法规 {lid} 处理失败（跳过）: {str(e)[:200]}")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,8 @@ DEFAULT = {
     "chat_model": "",
     "embedding_model": "",
     "temperature": 0.1,
+    # 附加请求头（如网关要求的 x-llm-channel），随请求发送
+    "extra_headers": {},
     # 爬虫限频（Fetcher 读取）
     "request_interval_sec": 5,
     "daily_max_per_source": 500,
