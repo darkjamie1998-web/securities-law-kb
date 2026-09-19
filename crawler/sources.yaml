@@ -35,10 +35,60 @@ sources:
     interval_sec: 6
     enabled: true
 
-  - name: 深圳证券交易所
+  # ---- 深交所“法律规则”栏目（已核实 2026-09-19，method=szse 支持翻页） ----
+  - name: 深交所-法律
     base_url: https://www.szse.cn
-    list_url: https://www.szse.cn/lawrules/rules/law/index.html   # 法律子栏目（已核实 2026-09-19）
+    list_url: https://www.szse.cn/lawrules/rules/law/index.html
     level: 法律
+    method: szse
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-行政法规
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/rules/regu/index.html
+    level: 行政法规
+    method: szse
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-司法解释
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/rules/judicial/index.html
+    level: 司法解释
+    method: szse
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-证监会令
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/csrcrules/command/index.html
+    level: 部门规章
+    method: szse
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-证监会公告
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/csrcrules/notice/index.html
+    level: 规范性文件
+    method: szse
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-监管规则适用指引
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/csrcrules/guide/index.html
+    level: 规范性文件
+    method: szse
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-最新规则
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/rule/new/index.html
+    level: 自律规则
+    method: szse
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-综合类规则
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/rule/all/index.html
+    level: 自律规则
     method: szse
     interval_sec: 6
     enabled: true

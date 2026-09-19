@@ -88,6 +88,26 @@ def upsert_law(db: sqlite3.Connection, source: dict, doc: dict) -> str:
     return action
 
 
+def _iter_list_pages(fetcher, source: dict):
+    """产出各列表页 HTML：szse 方法自动翻页（index_N.html），其他来源只取第一页。"""
+    from urllib.parse import urljoin
+
+    url = source["list_url"]
+    page = 0
+    while True:
+        resp = fetcher.get(url, source["name"],
+                           interval=source.get("interval_sec"))
+        if resp.status_code != 200:
+            if page > 0:
+                return  # 翻页到头（404），正常结束
+            raise RuntimeError(f"列表页请求失败 {resp.status_code}: {url}")
+        yield resp.text
+        if source.get("method") != "szse":
+            return
+        page += 1
+        url = urljoin(source["list_url"], f"index_{page}.html")
+
+
 def sync_source(
     db: sqlite3.Connection, fetcher, source: dict, limit: int | None = None
 ) -> dict:
@@ -95,10 +115,20 @@ def sync_source(
     new = updated = skipped = failed = 0
     errors = []
     try:
-        resp = fetcher.get(source["list_url"], source["name"],
-                           interval=source.get("interval_sec"))
-        links = extract_list(resp.text, source["list_url"],
-                             source.get("method", "generic"))
+        links = []
+        seen = set()
+        for html in _iter_list_pages(fetcher, source):
+            items = extract_list(html, source["list_url"],
+                                 source.get("method", "generic"))
+            fresh = [(t, u) for t, u in items if u not in seen]
+            if not fresh and len(links) > 0:
+                break  # 空页=翻页结束
+            for _, u in fresh:
+                seen.add(u)
+            links.extend(fresh)
+            if limit and len(links) >= limit:
+                links = links[:limit]
+                break
         if limit:
             links = links[:limit]
         for text, url in links:
