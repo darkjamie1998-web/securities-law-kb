@@ -1,16 +1,18 @@
 # app/main.py — FastAPI 入口：API 端点 + 静态页面挂载
-import json
 import sqlite3
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-from app.config import load_config
+from app.chat import agent_chat
+from app.config import load_config, save_config
 from app.db import get_db, init_db
 from app.llm import LLMClient, LLMError
 from app.search import hybrid_search
+from app.wiki import get_or_generate
 
 app = FastAPI(title="证券法律法规知识库")
 
@@ -138,6 +140,7 @@ def law_relations(law_id: int):
         raise HTTPException(404, "法规不存在")
     out = conn.execute(
         """SELECT r.rel_type, r.note, r.from_id, r.to_id,
+                  fa.law_id AS from_law_id, la.law_id AS to_law_id,
                   lt.title AS to_law_title, la.article_no AS to_article_no,
                   ft.title AS from_law_title, fa.article_no AS from_article_no
            FROM relations r
@@ -150,6 +153,7 @@ def law_relations(law_id: int):
     ).fetchall()
     inc = conn.execute(
         """SELECT r.rel_type, r.note, r.from_id, r.to_id,
+                  fa.law_id AS from_law_id, la.law_id AS to_law_id,
                   lt.title AS to_law_title, la.article_no AS to_article_no,
                   ft.title AS from_law_title, fa.article_no AS from_article_no
            FROM relations r
@@ -169,6 +173,108 @@ def search(q: str = Query(..., min_length=1), top_k: int = Query(10, ge=1, le=50
     conn = db()
     results = hybrid_search(conn, try_llm(), q, top_k)
     return {"query": q, "count": len(results), "results": results}
+
+
+# ---- 对话（Agent 多轮检索） ----
+class ChatRequest(BaseModel):
+    messages: list[dict]  # [{"role": "user"|"assistant", "content": "..."}]
+
+
+@app.post("/api/chat")
+def chat(req: ChatRequest):
+    conn = db()
+    try:
+        llm = LLMClient(load_config(DATA_DIR))
+    except LLMError as e:
+        raise HTTPException(400, f"大模型未配置：{e}")
+    try:
+        result = agent_chat(conn, llm, req.messages)
+    except LLMError as e:
+        raise HTTPException(502, f"大模型调用失败：{e}")
+    return result
+
+
+# ---- 模型配置 ----
+class SettingsBody(BaseModel):
+    api_base: str = ""
+    api_key: str = ""
+    chat_model: str = ""
+    embedding_model: str = ""
+    temperature: float = 0.1
+
+
+def _mask(key: str) -> str:
+    if not key or len(key) < 8:
+        return "*" * len(key)
+    return key[:3] + "****" + key[-4:]
+
+
+@app.get("/api/settings")
+def get_settings():
+    cfg = load_config(DATA_DIR)
+    return {
+        "api_base": cfg["api_base"],
+        "api_key_masked": _mask(cfg["api_key"]),
+        "has_key": bool(cfg["api_key"]),
+        "chat_model": cfg["chat_model"],
+        "embedding_model": cfg["embedding_model"],
+        "temperature": cfg["temperature"],
+    }
+
+
+@app.put("/api/settings")
+def put_settings(body: SettingsBody):
+    cfg = load_config(DATA_DIR)
+    cfg.update({
+        "api_base": body.api_base or cfg["api_base"],
+        # api_key 传空字符串表示保留原值（前端只在用户输入新值时提交）
+        "api_key": body.api_key or cfg["api_key"],
+        "chat_model": body.chat_model or cfg["chat_model"],
+        "embedding_model": body.embedding_model or cfg["embedding_model"],
+        "temperature": body.temperature,
+    })
+    saved = save_config(DATA_DIR, cfg)
+    return {"ok": True, "settings": {
+        "api_base": saved["api_base"], "api_key_masked": _mask(saved["api_key"]),
+        "chat_model": saved["chat_model"], "embedding_model": saved["embedding_model"],
+        "temperature": saved["temperature"],
+    }}
+
+
+@app.post("/api/settings/test")
+def test_settings(body: SettingsBody | None = None):
+    """用当前（或提交的）配置发一次最小请求验证连通。"""
+    cfg = load_config(DATA_DIR)
+    if body and (body.api_base or body.api_key or body.chat_model):
+        cfg.update({
+            "api_base": body.api_base or cfg["api_base"],
+            "api_key": body.api_key or cfg["api_key"],
+            "chat_model": body.chat_model or cfg["chat_model"],
+        })
+    try:
+        client = LLMClient(cfg)
+        msg = client.chat(
+            [{"role": "user", "content": "回复两个字：连通"}],
+            model=cfg.get("chat_model") or None,
+        )
+        return {"ok": True, "reply": (msg.get("content") or "")[:50]}
+    except LLMError as e:
+        return {"ok": False, "error": str(e)[:300]}
+
+
+# ---- wiki 解读 ----
+@app.post("/api/laws/{law_id}/wiki")
+def law_wiki(law_id: int, force: bool = False):
+    conn = db()
+    try:
+        llm = LLMClient(load_config(DATA_DIR))
+    except LLMError as e:
+        raise HTTPException(400, f"大模型未配置：{e}")
+    result = get_or_generate(conn, llm, law_id, force=force)
+    if result.get("error"):
+        raise HTTPException(404 if "不存在" in result["error"] else 502,
+                            result["error"])
+    return result
 
 
 # ---- 静态 ----
