@@ -37,8 +37,8 @@ sources:
 
   - name: 深圳证券交易所
     base_url: https://www.szse.cn
-    list_url: https://www.szse.cn/lawandrules/index/
-    level: 自律规则
+    list_url: https://www.szse.cn/lawrules/rules/law/index.html   # 法律子栏目（已核实 2026-09-19）
+    level: 法律
     method: szse
     interval_sec: 6
     enabled: true
