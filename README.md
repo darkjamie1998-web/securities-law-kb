@@ -68,4 +68,6 @@ tests/     38 个单元测试
 
 - 深交所已适配（PDF 正文）；证监会/上交所/北交所/国家法律法规数据库的专属解析器待真实页面适配（通用解析兜底）
 - 对话非流式输出（Agent 多轮检索后一次性返回，含检索轨迹和引用）
-- LLM 依赖 OpenAI 兼容 API；未配置时检索退化为纯关键词、对话/wiki 不可用
+- 当前网关（`x-llm-channel: workmate`）**不支持 embeddings 接口**：向量检索路自动跳过，检索为纯关键词（trigram FTS，中文效果良好）；如后续网关支持，在 `data/config.json` 填 `embedding_model` 并跑 `python -m app.embed` 即可启用
+- 网关内容安全过滤会拦截部分法规原文的 LLM 处理（如反洗钱法、网络安全法条文触发 SensitiveContentDetected）：relations 抽取对这类法规自动跳过，wiki 生成会返回失败提示，属网关限制而非知识库缺陷
+- 关联图谱依赖库内法规覆盖度：目标法规不在库内时关系记录为 unmatched（不强行写入），全量入库后自然改善
