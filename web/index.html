@@ -7,13 +7,106 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+  <!-- 顶栏 -->
   <header class="topbar">
-    <span class="brand">证券法律法规知识库</span>
-    <span class="placeholder-hint">建设中 · M1 骨架已就绪</span>
+    <span class="brand" id="brand">⚖ 证券法律法规知识库</span>
+    <div class="topbar-center">
+      <input id="globalSearch" type="search" placeholder="搜索法条关键词，回车检索…">
+    </div>
+    <div class="topbar-right">
+      <span id="statBadge" class="stat-badge" title="知识库统计"></span>
+      <button id="btnSettings" class="btn-icon" title="大模型配置">⚙ 配置</button>
+    </div>
   </header>
-  <main class="placeholder-main">
-    <h1>证券法律法规知识库</h1>
-    <p>知识库正在建设中。当前阶段：项目骨架（M1）。</p>
-  </main>
+
+  <div class="layout">
+    <!-- 左侧导航树 -->
+    <aside class="sidebar">
+      <div class="sidebar-title">效力级别</div>
+      <nav id="levelNav" class="level-nav"></nav>
+      <div class="sidebar-title">状态</div>
+      <nav class="level-nav">
+        <a href="#" data-status="现行有效">● 现行有效</a>
+        <a href="#" data-status="已修订">● 已修订</a>
+        <a href="#" data-status="已废止">● 已废止</a>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="syncInfo" class="sync-info"></span>
+      </div>
+    </aside>
+
+    <!-- 主区域 -->
+    <main id="main" class="main">
+      <!-- 视图：欢迎页 -->
+      <section id="viewHome" class="view">
+        <h1>证券法律法规知识库</h1>
+        <p class="muted">左侧选择效力级别浏览法规，顶部搜索法条，底部对话框直接提问研究。</p>
+      </section>
+      <!-- 视图：法规列表 -->
+      <section id="viewList" class="view hidden">
+        <div class="list-header"><h2 id="listTitle"></h2><span id="listCount" class="muted"></span></div>
+        <div id="lawList" class="law-list"></div>
+        <div id="pager" class="pager"></div>
+      </section>
+      <!-- 视图：法规详情 -->
+      <section id="viewDetail" class="view hidden">
+        <button class="btn-link" id="btnBack">← 返回列表</button>
+        <div id="lawHeader" class="law-header"></div>
+        <div class="detail-cols">
+          <div class="detail-articles">
+            <h3>条文</h3>
+            <div id="articleList"></div>
+          </div>
+          <div class="detail-side">
+            <div id="relationBox" class="side-box">
+              <h3>关联法规</h3>
+              <div id="relationList" class="relation-list"></div>
+            </div>
+            <div class="side-box">
+              <h3>Wiki 解读 <button id="btnWiki" class="btn-small">生成/刷新解读</button></h3>
+              <div id="wikiBox" class="wiki-box"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <!-- 视图：搜索结果 -->
+      <section id="viewSearch" class="view hidden">
+        <div class="list-header"><h2 id="searchTitle"></h2><span id="searchCount" class="muted"></span></div>
+        <div id="searchResults"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 底部全局对话栏 -->
+  <footer class="chatbar">
+    <div id="chatLog" class="chat-log">
+      <div class="chat-hint">对话研究：输入证券法律法规问题（如"内幕交易的构成要件和处罚？"），回答将附法条引用，点击引用可跳转原文。</div>
+    </div>
+    <div class="chat-input-row">
+      <button id="btnClearChat" class="btn-small" title="清空对话">🗑</button>
+      <input id="chatInput" type="text" placeholder="输入法律法规问题，回车发送…">
+      <button id="btnSend" class="btn-primary">发送</button>
+    </div>
+  </footer>
+
+  <!-- 模型配置弹窗 -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-body">
+      <h2>⚙ 大模型配置（OpenAI 兼容 API）</h2>
+      <label>API 地址（api_base）<input id="cfgApiBase" placeholder="https://api.example.com/v1"></label>
+      <label>API Key<input id="cfgApiKey" type="password" placeholder="留空表示保留当前值"></label>
+      <label>对话模型（chat_model）<input id="cfgChatModel" placeholder="如 deepseek-chat / glm-4 / qwen-max"></label>
+      <label>Embedding 模型<input id="cfgEmbedModel" placeholder="如 text-embedding-3-small"></label>
+      <label>温度（temperature）<input id="cfgTemp" type="number" step="0.1" min="0" max="2" value="0.1"></label>
+      <div class="modal-actions">
+        <span id="cfgStatus" class="cfg-status"></span>
+        <button id="btnTestConn" class="btn-secondary">测试连接</button>
+        <button id="btnSaveCfg" class="btn-primary">保存</button>
+        <button id="btnCloseCfg" class="btn-secondary">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
 </body>
 </html>
