@@ -1,0 +1,9 @@
+{
+  "api_base": "https://api.example.com/v1",
+  "api_key": "",
+  "chat_model": "",
+  "embedding_model": "",
+  "temperature": 0.1,
+  "request_interval_sec": 5,
+  "daily_max_per_source": 500
+}
