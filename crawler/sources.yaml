@@ -1,0 +1,59 @@
+# crawler/sources.yaml — 官方信息来源清单（用户可随时增删）
+# 字段说明：
+#   name         来源名称（写入 laws.source_name 与 sync_log）
+#   base_url     站点根，用于 robots.txt 检查与同站限频归并
+#   list_url     法规列表/栏目入口页
+#   level        该来源法规的默认效力级别
+#   method       解析器标识，对应 crawler/parsers.py 中的实现
+#   interval_sec 该站点请求最小间隔（秒），缺省用全局配置
+#   daily_max    单日该来源最大请求数，缺省用全局配置
+#   enabled      是否参与同步
+sources:
+  - name: 国家法律法规数据库
+    base_url: https://flk.npc.gov.cn
+    list_url: https://flk.npc.gov.cn/index.html
+    level: 法律
+    method: flk
+    interval_sec: 8
+    daily_max: 300
+    enabled: true
+
+  - name: 中国证监会
+    base_url: http://www.csrc.gov.cn
+    list_url: http://www.csrc.gov.cn/csrc/c101969/zfsgg_list.shtml
+    level: 部门规章
+    method: csrc
+    interval_sec: 6
+    daily_max: 200
+    enabled: true
+
+  - name: 上海证券交易所
+    base_url: https://www.sse.com.cn
+    list_url: https://www.sse.com.cn/lawandrules/sselaws/
+    level: 自律规则
+    method: sse
+    interval_sec: 6
+    enabled: true
+
+  - name: 深圳证券交易所
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawandrules/index/
+    level: 自律规则
+    method: szse
+    interval_sec: 6
+    enabled: true
+
+  - name: 北京证券交易所
+    base_url: https://www.bse.cn
+    list_url: https://www.bse.cn/flfg/
+    level: 自律规则
+    method: bse
+    interval_sec: 6
+    enabled: true
+
+  - name: 最高人民法院
+    base_url: https://www.court.gov.cn
+    list_url: https://www.court.gov.cn/zixun-gengduo-sifa_jieshi.html
+    level: 司法解释
+    method: court
+    enabled: false          # 暂缓启用：先保核心来源，解析器就绪后再开
