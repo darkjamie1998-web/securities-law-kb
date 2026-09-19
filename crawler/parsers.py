@@ -89,6 +89,43 @@ def parse_law(html: str, source_url: str, method: str = "generic") -> dict:
     return parser(html, source_url)
 
 
+# ---- 深交所：列表项在 <li><script> 的 curHref/curTitle 变量里，正文多为 PDF ----
+SZSE_ITEM_RE = re.compile(
+    r"var\s+curHref\s*=\s*[\"\x27]([^\"\x27]+)[\"\x27];"
+    r".*?var\s+curTitle\s*=\s*[\"\x27]([^\"\x27]*)[\"\x27];",
+    re.S,
+)
+
+
+def extract_szse_list(html: str, base_url: str) -> list[tuple[str, str]]:
+    """深交所规则列表：提取 (法规名, 详情/PDF 绝对URL)。"""
+    from urllib.parse import urljoin
+
+    out, seen = [], set()
+    for m in SZSE_ITEM_RE.finditer(html):
+        href, title = m.group(1).strip(), m.group(2).strip()
+        if not href or not title or title == "无标题":
+            continue
+        url = urljoin(base_url, href)
+        if url not in seen:
+            seen.add(url)
+            out.append((title, url))
+    return out
+
+
+# 各来源列表页提取器：method → list 提取函数（缺省用 <a> 标签通用提取）
+LIST_EXTRACTORS = {
+    "szse": extract_szse_list,
+}
+
+
+def extract_list(html: str, base_url: str, method: str = "generic") -> list[tuple[str, str]]:
+    fn = LIST_EXTRACTORS.get(method)
+    if fn:
+        return fn(html, base_url)
+    return extract_links(html, base_url)
+
+
 def extract_links(html: str, base_url: str, pattern: str = r".*") -> list[tuple[str, str]]:
     """列表页提取 (链接文本, 绝对 URL)，按正则过滤链接文本或 href。"""
     soup = BeautifulSoup(html, "lxml")
