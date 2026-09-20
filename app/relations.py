@@ -49,12 +49,13 @@ def _digest(db: sqlite3.Connection, law_id: int, max_chars: int = 1500) -> str:
 
 
 def extract_relations(llm: LLMClient, title: str, issuer: str, digest: str) -> list[dict]:
-    """调用 LLM 抽取关系（结构化输出）。"""
-    msg = llm.chat(
-        [{"role": "user", "content": PROMPT.format(
-            title=title, issuer=issuer or "未知", digest=digest)}],
-        max_tokens=3000,
-    )
+    """调用 LLM 抽取关系（结构化输出）。
+
+    注意：不设 max_tokens —— 网关模型的思考过程(reasoning)与输出共用额度，
+    设小会截断关系 JSON（实测 3000 会全部截空）。
+    """
+    msg = llm.chat([{"role": "user", "content": PROMPT.format(
+        title=title, issuer=issuer or "未知", digest=digest)}])
     content = msg["content"] or ""
     m = re.search(r"\{.*\}", content, re.S)
     if not m:
