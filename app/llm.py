@@ -56,7 +56,7 @@ class LLMClient:
             f"{self.api_base}/chat/completions",
             headers=self._headers(),
             json=payload,
-            timeout=300,  # 推理型模型长文生成需要较长时间
+            timeout=600,  # 推理型模型长文生成需要较长时间（部分法规关系抽取超 300s）
         )
         if resp.status_code != 200:
             raise LLMError(f"chat 失败 {resp.status_code}: {resp.text[:300]}")
