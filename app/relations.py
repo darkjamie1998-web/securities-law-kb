@@ -38,20 +38,23 @@ PROMPT = """你是证券法律法规专家。分析以下法规，抽取它与�
 - 最多输出 15 条最重要的关系"""
 
 
-def _digest(db: sqlite3.Connection, law_id: int, max_chars: int = 3000) -> str:
-    """条文摘要：全文超长时取首部+尾部。"""
+def _digest(db: sqlite3.Connection, law_id: int, max_chars: int = 1500) -> str:
+    """条文摘要：全文超长时取首部+尾部（缩短以控制推理耗时与超时）。"""
     text = db.execute(
         "SELECT full_text FROM laws WHERE id=?", (law_id,)
     ).fetchone()["full_text"] or ""
     if len(text) <= max_chars:
         return text
-    return text[: max_chars // 2] + "\n……（中略）……\n" + text[-max_chars // 2:]
+    return text[: max_chars * 2 // 3] + "\n……（中略）……\n" + text[-max_chars // 3:]
 
 
 def extract_relations(llm: LLMClient, title: str, issuer: str, digest: str) -> list[dict]:
     """调用 LLM 抽取关系（结构化输出）。"""
-    msg = llm.chat([{"role": "user", "content": PROMPT.format(
-        title=title, issuer=issuer or "未知", digest=digest)}])
+    msg = llm.chat(
+        [{"role": "user", "content": PROMPT.format(
+            title=title, issuer=issuer or "未知", digest=digest)}],
+        max_tokens=3000,
+    )
     content = msg["content"] or ""
     m = re.search(r"\{.*\}", content, re.S)
     if not m:
@@ -71,29 +74,35 @@ def extract_relations(llm: LLMClient, title: str, issuer: str, digest: str) -> l
 
 def _match_law(db: sqlite3.Connection, ref_title: str):
     """在库内按标题模糊定位目标法规。返回 law row 或 None。"""
-    row = db.execute(
-        "SELECT * FROM laws WHERE title = ?", (ref_title,)
-    ).fetchone()
-    if row:
-        return row
-    # 去掉版本后缀再匹配：如"证券法（2019修订）"→"证券法"
-    core = re.sub(r"[（(][^）)]*[修订修正]{2}[^）)]*[）)]$", "", ref_title).strip()
-    if core and core != ref_title:
-        row = db.execute("SELECT * FROM laws WHERE title = ?", (core,)).fetchone()
+    # 归一化：去书名号、去"关于修改《X》的决定"包装、去版本后缀
+    t = ref_title.strip().strip("《》")
+    m = re.search(r"修改[《「]?(.+?)[》》]?的决", ref_title)
+    if m:
+        t = m.group(1).strip("《》")
+    candidates = [ref_title, t]
+    core = re.sub(r"[（(][^）)]*[修订修正]{2}[^）)]*[）)]$", "", t).strip()
+    if core and core != t:
+        candidates.append(core)
+    core_short = re.sub(r"^中华人民共和国", "", core) if core else ""
+    if core_short and core_short != core:
+        candidates.append(core_short)
+
+    # 1) 精确匹配（含各变体）
+    for c in candidates:
+        if not c:
+            continue
+        row = db.execute("SELECT * FROM laws WHERE title = ?", (c,)).fetchone()
         if row:
             return row
-    # 标题包含匹配（库内标题含引用名，或引用名含库内标题核心）
-    row = db.execute(
-        "SELECT * FROM laws WHERE title LIKE ? LIMIT 1", (f"%{core}%",)
-    ).fetchone()
-    if row:
-        return row
-    core_short = re.sub(r"^中华人民共和国", "", core)
-    if core_short != core:
+    # 2) 包含匹配（短词优先，标题最短的优先，减少误匹配）
+    for c in sorted([c for c in candidates if c], key=len):
         row = db.execute(
-            "SELECT * FROM laws WHERE title LIKE ? LIMIT 1", (f"%{core_short}%",)
+            "SELECT * FROM laws WHERE title LIKE ? ORDER BY length(title) LIMIT 1",
+            (f"%{c}%",),
         ).fetchone()
-    return row
+        if row:
+            return row
+    return None
 
 
 def _first_article(db: sqlite3.Connection, law_id: int):

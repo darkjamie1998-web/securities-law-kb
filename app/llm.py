@@ -40,13 +40,16 @@ class LLMClient:
 
     # ---- chat ----
     def chat(self, messages: list[dict], tools: list | None = None,
-             stream: bool = False, model: str | None = None):
+             stream: bool = False, model: str | None = None,
+             max_tokens: int | None = None):
         """非流式：返回 dict（choices[0].message）。stream=False 时使用。"""
         payload = {
             "model": model or self.chat_model,
             "messages": messages,
             "temperature": self.temperature,
         }
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
         if tools:
             payload["tools"] = tools
         resp = httpx.post(
