@@ -60,19 +60,24 @@ def upsert_law(db: sqlite3.Connection, source: dict, doc: dict) -> str:
         )
         action = "updated"
     else:
-        cur = db.execute(
-            """INSERT INTO laws(title, doc_number, issuer, level, issue_date,
-               effective_date, source_name, source_url, content_hash, full_text,
-               created_at, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                title, doc.get("doc_number"), doc.get("issuer"), source.get("level", ""),
-                doc.get("issue_date"), doc.get("effective_date"), source["name"],
-                doc.get("source_url"), chash, full_text, now, now,
-            ),
-        )
-        law_id = cur.lastrowid
-        action = "new"
+        try:
+            cur = db.execute(
+                """INSERT INTO laws(title, doc_number, issuer, level, issue_date,
+                   effective_date, source_name, source_url, content_hash, full_text,
+                   created_at, updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    title, doc.get("doc_number"), doc.get("issuer"), source.get("level", ""),
+                    doc.get("issue_date"), doc.get("effective_date"), source["name"],
+                    doc.get("source_url"), chash, full_text, now, now,
+                ),
+            )
+            law_id = cur.lastrowid
+            action = "new"
+        except sqlite3.IntegrityError:
+            # 同内容 PDF 挂在多个栏目（不同 source_name）：视为已入库，跳过
+            db.rollback()
+            return "skip"
 
     # 法条重建（FTS 触发器自动同步）
     db.execute("DELETE FROM articles WHERE law_id=?", (law_id,))
