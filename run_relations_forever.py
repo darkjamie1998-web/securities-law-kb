@@ -55,13 +55,21 @@ def main():
         ok = fail = 0
         for r in rows:
             try:
-                result = process_law(db, llm, r["id"])
+                try:
+                    result = process_law(db, llm, r["id"])
+                except Exception as first_err:
+                    # 超时类失败：用极短 digest 降级重试一次（超长法规如证券法）
+                    if "timed out" not in str(first_err):
+                        raise
+                    print(f"  [{r['id']}] {r['title'][:30]} 超时，降级重试（短摘要）...",
+                          flush=True)
+                    result = process_law(db, llm, r["id"], digest_chars=400)
                 print(f"  [{r['id']}] {result.get('title', r['title'])[:30]} "
                       f"extracted={result.get('extracted')} saved={result.get('saved')}",
                       flush=True)
                 ok += 1
             except Exception as e:
-                # 超时/内容过滤等：跳过，下轮循环会重试（幂等）
+                # 内容过滤/持续超时等：跳过，下轮循环会重试（幂等）
                 print(f"  [{r['id']}] {r['title'][:30]} 失败（下轮重试）: {str(e)[:120]}",
                       flush=True)
                 fail += 1

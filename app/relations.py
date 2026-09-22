@@ -121,12 +121,14 @@ def _has_relations(db: sqlite3.Connection, law_id: int) -> bool:
     return r is not None
 
 
-def process_law(db: sqlite3.Connection, llm: LLMClient, law_id: int) -> dict:
+def process_law(db: sqlite3.Connection, llm: LLMClient, law_id: int,
+                digest_chars: int = 1500) -> dict:
     law = db.execute("SELECT * FROM laws WHERE id=?", (law_id,)).fetchone()
     if not law:
         return {"law_id": law_id, "error": "法规不存在"}
     rels = extract_relations(
-        llm, law["title"], law["issuer"] or "", _digest(db, law_id))
+        llm, law["title"], law["issuer"] or "",
+        _digest(db, law_id, max_chars=digest_chars))
     now = datetime.now().isoformat(timespec="seconds")
     saved = unmatched = 0
     from_art = _first_article(db, law_id)
