@@ -16,7 +16,7 @@ sources:
     method: flk
     interval_sec: 8
     daily_max: 300
-    enabled: true
+    enabled: false         # 全站 JS 渲染且旧 API 已关闭（405，2026-09-22 核实），待 Playwright 深度适配；法律/行政法规已由两所栏目覆盖
 
   - name: 中国证监会
     base_url: http://www.csrc.gov.cn
@@ -25,7 +25,7 @@ sources:
     method: csrc
     interval_sec: 6
     daily_max: 200
-    enabled: true
+    enabled: false         # 官网+neris 法规库均为动态 SPA（2026-09-22 核实），待 Playwright 深度适配；证监会令/公告已由深交所栏目覆盖
 
   - name: 上海证券交易所
     base_url: https://www.sse.com.cn
@@ -33,7 +33,7 @@ sources:
     level: 自律规则
     method: sse
     interval_sec: 6
-    enabled: true
+    enabled: false         # 旧入口已 404，由下方"上交所-*"栏目替代（2026-09-22）
 
   # ---- 深交所“法律规则”栏目（已核实 2026-09-19，method=szse 支持翻页） ----
   - name: 深交所-法律
@@ -82,22 +82,110 @@ sources:
     base_url: https://www.szse.cn
     list_url: https://www.szse.cn/lawrules/rule/new/index.html
     level: 自律规则
-    method: szse
+    method: szse_render
+    render: true            # JS 动态渲染：列表页走 Playwright
+    wait_selector: ".newslist li"
     interval_sec: 6
     enabled: true
   - name: 深交所-综合类规则
     base_url: https://www.szse.cn
     list_url: https://www.szse.cn/lawrules/rule/all/index.html
     level: 自律规则
-    method: szse
+    method: szse_render
+    render: true
+    wait_selector: ".newslist li"
+    interval_sec: 6
+    enabled: true
+  # ---- 深交所"本所业务规则"子栏目（JS 渲染，Playwright 抓取） ----
+  - name: 深交所-发行上市审核
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/rule/stock/audit/index.html
+    level: 自律规则
+    method: szse_render
+    render: true
+    wait_selector: ".newslist li"
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-发行承销
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/rule/stock/issue/index.html
+    level: 自律规则
+    method: szse_render
+    render: true
+    wait_selector: ".newslist li"
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-持续监管通用
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/rule/stock/supervision/currency/index.html
+    level: 自律规则
+    method: szse_render
+    render: true
+    wait_selector: ".newslist li"
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-主板专用规则
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/rule/stock/supervision/mb/index.html
+    level: 自律规则
+    method: szse_render
+    render: true
+    wait_selector: ".newslist li"
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-创业板专用规则
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/rule/stock/supervision/chinext/index.html
+    level: 自律规则
+    method: szse_render
+    render: true
+    wait_selector: ".newslist li"
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-股票交易规则
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/rule/stock/trade/index.html
+    level: 自律规则
+    method: szse_render
+    render: true
+    wait_selector: ".newslist li"
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-债券规则
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/rule/bond/bonds/list/index.html
+    level: 自律规则
+    method: szse_render
+    render: true
+    wait_selector: ".newslist li"
+    interval_sec: 6
+    enabled: true
+  - name: 深交所-基金规则
+    base_url: https://www.szse.cn
+    list_url: https://www.szse.cn/lawrules/rule/fund/list/index.html
+    level: 自律规则
+    method: szse_render
+    render: true
+    wait_selector: ".newslist li"
     interval_sec: 6
     enabled: true
 
-  - name: 北京证券交易所
+  - name: 北交所-法律
     base_url: https://www.bse.cn
-    list_url: https://www.bse.cn/flfg/
-    level: 自律规则
+    list_url: https://www.bse.cn/rule/law_list.html
+    level: 法律
     method: bse
+    render: true            # 列表 JS 渲染（table + /uploads/*.pdf）
+    wait_selector: "table tbody tr"
+    interval_sec: 6
+    enabled: true
+  - name: 北交所-行政法规
+    base_url: https://www.bse.cn
+    list_url: https://www.bse.cn/rule/council_list.html
+    level: 行政法规
+    method: bse
+    render: true
+    wait_selector: "table tbody tr"
     interval_sec: 6
     enabled: true
 
@@ -107,3 +195,33 @@ sources:
     level: 司法解释
     method: court
     enabled: false          # 暂缓启用：先保核心来源，解析器就绪后再开
+
+  # ---- 上交所（静态可抓，已核实 2026-09-22；正文为 .docx 附件） ----
+  - name: 上交所-法律
+    base_url: https://www.sse.com.cn
+    list_url: https://www.sse.com.cn/lawandrules/rules/law/securities/
+    level: 法律
+    method: sse
+    interval_sec: 6
+    enabled: true
+  - name: 上交所-行政法规
+    base_url: https://www.sse.com.cn
+    list_url: https://www.sse.com.cn/lawandrules/rules/admin/securities/
+    level: 行政法规
+    method: sse
+    interval_sec: 6
+    enabled: true
+  - name: 上交所-监管规则适用指引
+    base_url: https://www.sse.com.cn
+    list_url: https://www.sse.com.cn/lawandrules/regulations/guidelines/
+    level: 规范性文件
+    method: sse
+    interval_sec: 6
+    enabled: true
+  - name: 上交所-最新规则
+    base_url: https://www.sse.com.cn
+    list_url: https://www.sse.com.cn/lawandrules/sselawsrules2025/latest/
+    level: 自律规则
+    method: sse
+    interval_sec: 6
+    enabled: true

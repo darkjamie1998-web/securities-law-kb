@@ -56,6 +56,32 @@ def extract_text_from_pdf(pdf_path) -> str:
     return "\n".join(chunks)
 
 
+def extract_text_from_docx(docx_path) -> str:
+    """Word(.docx) → 纯文本（惰性导入 python-docx，含表格）。"""
+    try:
+        import docx
+    except ImportError as e:
+        raise RuntimeError("需要安装 python-docx：.venv/Scripts/python.exe -m pip install python-docx") from e
+    d = docx.Document(str(docx_path))
+    parts = [p.text for p in d.paragraphs if p.text.strip()]
+    for table in d.tables:
+        for row in table.rows:
+            cells = [c.text.strip() for c in row.cells if c.text.strip()]
+            if cells:
+                parts.append(" | ".join(cells))
+    return "\n".join(parts)
+
+
+def extract_text_from_file(path) -> str:
+    """按扩展名自动分派 PDF/DOCX 文本提取。"""
+    p = str(path).lower()
+    if p.endswith(".pdf"):
+        return extract_text_from_pdf(path)
+    if p.endswith((".docx", ".doc")):
+        return extract_text_from_docx(path)
+    raise ValueError(f"不支持的文件类型: {path}")
+
+
 # ---- 各来源列表页/详情页解析（返回统一结构） ----
 # LawDoc 字段：title / doc_number / issuer / dates / full_text / source_url
 
@@ -116,7 +142,65 @@ def extract_szse_list(html: str, base_url: str) -> list[tuple[str, str]]:
 # 各来源列表页提取器：method → list 提取函数（缺省用 <a> 标签通用提取）
 LIST_EXTRACTORS = {
     "szse": extract_szse_list,
+    "szse_render": None,  # 占位，下方实现
 }
+
+
+def extract_szse_render_list(html: str, base_url: str) -> list[tuple[str, str]]:
+    """深交所业务规则（JS 渲染页）：Playwright 渲染后取 .newslist 容器内链接。"""
+    from urllib.parse import urljoin
+
+    soup = BeautifulSoup(html, "lxml")
+    box = soup.select_one(".newslist") or soup
+    out, seen = [], set()
+    for a in box.find_all("a", href=True):
+        text = a.get_text(strip=True)
+        if len(text) < 6:
+            continue
+        url = urljoin(str(base_url), a["href"])
+        if url.startswith("http") and url not in seen:
+            seen.add(url)
+            out.append((text, url))
+    return out
+
+
+LIST_EXTRACTORS["szse_render"] = extract_szse_render_list
+
+
+# 上交所：法规链接特征为 /c/<id>/files/<hash>.docx|pdf 或 c_<date>_<id>.shtm
+SSE_URL_RE = re.compile(r"/c/\d+/files/|/c/c_\d+_\d+\.shtm")
+
+
+def extract_sse_list(html: str, base_url: str) -> list[tuple[str, str]]:
+    """上交所法规列表：仅提取 /c/<id>/files/* 与 c_*.shtm 详情链接，排除导航。"""
+    out, seen = [], set()
+    for text, url in extract_links(html, base_url):
+        if SSE_URL_RE.search(url):
+            if url not in seen:
+                seen.add(url)
+                out.append((text, url))
+    return out
+
+
+LIST_EXTRACTORS["sse"] = extract_sse_list
+
+
+# 北交所：法规在 table 内，附件为 /uploads/**.pdf
+BSE_URL_RE = re.compile(r"/uploads/|\.pdf$")
+
+
+def extract_bse_list(html: str, base_url: str) -> list[tuple[str, str]]:
+    """北交所法规列表：取表格内指向 uploads/PDF 的链接。"""
+    out, seen = [], set()
+    for text, url in extract_links(html, base_url):
+        if BSE_URL_RE.search(url):
+            if url not in seen:
+                seen.add(url)
+                out.append((text, url))
+    return out
+
+
+LIST_EXTRACTORS["bse"] = extract_bse_list
 
 
 def extract_list(html: str, base_url: str, method: str = "generic") -> list[tuple[str, str]]:
@@ -126,8 +210,11 @@ def extract_list(html: str, base_url: str, method: str = "generic") -> list[tupl
     return extract_links(html, base_url)
 
 
-def extract_links(html: str, base_url: str, pattern: str = r".*") -> list[tuple[str, str]]:
-    """列表页提取 (链接文本, 绝对 URL)，按正则过滤链接文本或 href。"""
+def extract_links(html: str, base_url, pattern: str = r".*") -> list[tuple[str, str]]:
+    """列表页提取 (链接文本, 绝对 URL)，按正则过滤链接文本或 href。
+
+    base_url 接受 str 或 httpx.URL（自动转 str）。
+    """
     soup = BeautifulSoup(html, "lxml")
     rx = re.compile(pattern)
     seen, out = set(), []
@@ -137,7 +224,7 @@ def extract_links(html: str, base_url: str, pattern: str = r".*") -> list[tuple[
         if not text or not rx.search(text) and not rx.search(href):
             continue
         from urllib.parse import urljoin
-        url = urljoin(base_url, href)
+        url = urljoin(str(base_url), href)
         if url.startswith("http") and url not in seen:
             seen.add(url)
             out.append((text, url))
