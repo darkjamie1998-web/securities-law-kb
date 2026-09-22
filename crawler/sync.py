@@ -19,7 +19,7 @@ from crawler.fetcher import default_fetcher
 from crawler.parsers import (
     content_hash,
     extract_list,
-    extract_text_from_pdf,
+    extract_text_from_file,
     parse_law,
     split_articles,
 )
@@ -114,40 +114,52 @@ def _iter_list_pages(fetcher, source: dict):
 
 
 def sync_source(
-    db: sqlite3.Connection, fetcher, source: dict, limit: int | None = None
+    db: sqlite3.Connection, fetcher, source: dict, limit: int | None = None,
+    browser=None,
 ) -> dict:
     started = datetime.now().isoformat(timespec="seconds")
     new = updated = skipped = failed = 0
     errors = []
     try:
-        links = []
-        seen = set()
-        for html in _iter_list_pages(fetcher, source):
-            items = extract_list(html, source["list_url"],
+        if source.get("render") and browser is not None:
+            # JS 动态渲染站点：列表页走 Playwright（详情仍走 httpx）
+            html = browser.render(source["list_url"], source["name"],
+                                  wait_selector=source.get("wait_selector"))
+            links = extract_list(html, source["list_url"],
                                  source.get("method", "generic"))
-            fresh = [(t, u) for t, u in items if u not in seen]
-            if not fresh and len(links) > 0:
-                break  # 空页=翻页结束
-            for _, u in fresh:
-                seen.add(u)
-            links.extend(fresh)
-            if limit and len(links) >= limit:
+            if limit:
                 links = links[:limit]
-                break
+        else:
+            links = []
+            seen = set()
+            for html in _iter_list_pages(fetcher, source):
+                items = extract_list(html, source["list_url"],
+                                     source.get("method", "generic"))
+                fresh = [(t, u) for t, u in items if u not in seen]
+                if not fresh and len(links) > 0:
+                    break  # 空页=翻页结束
+                for _, u in fresh:
+                    seen.add(u)
+                links.extend(fresh)
+                if limit and len(links) >= limit:
+                    links = links[:limit]
+                    break
         if limit:
             links = links[:limit]
         for text, url in links:
             try:
-                if url.lower().endswith(".pdf"):
-                    # PDF 正文：下载后提取文本，标题用列表页名称
-                    pdf_path = DATA_DIR / "raw" / "pdf" / (
-                        content_hash(url) + ".pdf"
+                low = url.lower()
+                if low.endswith((".pdf", ".docx", ".doc")):
+                    # 附件正文（PDF/Word）：下载后提取文本，标题用列表页名称
+                    ext = ".pdf" if low.endswith(".pdf") else ".docx"
+                    file_path = DATA_DIR / "raw" / "files" / (
+                        content_hash(url) + ext
                     )
-                    fetcher.download_pdf(url, pdf_path, source["name"],
+                    fetcher.download_pdf(url, file_path, source["name"],
                                          interval=source.get("interval_sec"))
                     doc = {
                         "title": text,
-                        "full_text": extract_text_from_pdf(pdf_path),
+                        "full_text": extract_text_from_file(file_path),
                         "source_url": url,
                     }
                 else:
@@ -207,14 +219,28 @@ def main():
             print(f"未找到来源：{args.source}（检查 crawler/sources.yaml 的 enabled/name）")
             return
 
-    for s in sources:
-        print(f"[sync] {s['name']} …", flush=True)
-        r = sync_source(db, fetcher, s, args.limit)
-        print(f"[sync] {s['name']}: new={r['new']} updated={r['updated']} "
-              f"skipped={r['skipped']} failed={r['failed']} status={r['status']}")
-        for e in r["errors"][:5]:
-            print(f"       {e}")
-    fetcher.close()
+    # 有 render 来源时才启动无头浏览器（懒加载，避免无谓开销）
+    browser = None
+    if any(s.get("render") for s in sources):
+        from crawler.browser_fetcher import BrowserFetcher
+        from crawler.fetcher import RateLimiter
+        browser = BrowserFetcher(
+            rate_limiter=RateLimiter(default_interval=float(cfg.get("request_interval_sec", 5))),
+            daily_max=int(cfg.get("daily_max_per_source", 500)),
+        )
+
+    try:
+        for s in sources:
+            print(f"[sync] {s['name']} …", flush=True)
+            r = sync_source(db, fetcher, s, args.limit, browser=browser)
+            print(f"[sync] {s['name']}: new={r['new']} updated={r['updated']} "
+                  f"skipped={r['skipped']} failed={r['failed']} status={r['status']}")
+            for e in r["errors"][:5]:
+                print(f"       {e}")
+    finally:
+        if browser:
+            browser.close()
+        fetcher.close()
 
 
 if __name__ == "__main__":

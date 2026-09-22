@@ -10,7 +10,13 @@ from urllib.parse import urlparse
 
 import httpx
 
-USER_AGENT = "LawKB-Research/1.0 (compliance study; contact: local)"
+USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 LawKB-Research/1.0")
+BROWSER_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9",
+}
 RETRY_DELAYS = (10, 30, 60)  # 指数退避（秒）
 JITTER = (0.3, 1.5)
 
@@ -47,11 +53,12 @@ class Fetcher:
         self.daily_max = daily_max
         self.archive_dir = archive_dir
         self._client = httpx.Client(
-            timeout=30, headers={"User-Agent": USER_AGENT}, follow_redirects=True
+            timeout=30, headers=BROWSER_HEADERS, follow_redirects=True
         )
         self._counts: dict[str, int] = {}
         self._robots: dict[str, urllib.robotparser.RobotFileParser | None] = {}
         self._consecutive_failures: dict[str, int] = {}
+        self._referer: dict[str, str] = {}  # host → 最后访问页（用作 Referer）
 
     # ---- 内部 ----
     def _host(self, url: str) -> str:
@@ -113,7 +120,12 @@ class Fetcher:
         last_exc: Exception | None = None
         for attempt in range(len(RETRY_DELAYS) + 1):
             try:
-                resp = self._client.get(url)
+                headers = {}
+                ref = self._referer.get(self._host(url))
+                if ref:
+                    headers["Referer"] = ref
+                resp = self._client.get(url, headers=headers)
+                self._referer[self._host(url)] = url
                 if resp.status_code in (429, 503):
                     self._bump(source, ok=False)
                     raise httpx.HTTPStatusError(
