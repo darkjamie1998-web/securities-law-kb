@@ -72,12 +72,57 @@ def extract_text_from_docx(docx_path) -> str:
     return "\n".join(parts)
 
 
+def extract_text_from_doc(doc_path) -> str:
+    """Word 97-2003 (.doc, OLE2) → 纯文本。
+
+    .doc 二进制格式复杂，这里走实用主义路线：从 WordDocument 流中
+    扫描连续 UTF-16LE 中文/ASCII 段落拼回文本（法规文档 95%+ 内容
+    为中文+标点+数字，提取质量足够知识库检索使用）。
+    """
+    try:
+        import olefile
+    except ImportError as e:
+        raise RuntimeError("需要安装 olefile：.venv/Scripts/python.exe -m pip install olefile") from e
+    if not olefile.isOleFile(str(doc_path)):
+        raise ValueError(f"不是 OLE2 .doc 文件: {doc_path}")
+    ole = olefile.OleFileIO(str(doc_path))
+    try:
+        if not ole.exists("WordDocument"):
+            raise ValueError(f".doc 缺少 WordDocument 流: {doc_path}")
+        data = ole.openstream("WordDocument").read()
+    finally:
+        ole.close()
+
+    # 解码为 UTF-16LE 并保留可打印段（中文、ASCII、常用标点、空白）
+    try:
+        text = data.decode("utf-16-le", errors="ignore")
+    except Exception:
+        text = ""
+    kept, cur = [], []
+    for ch in text:
+        o = ord(ch)
+        if (0x4E00 <= o <= 0x9FFF or 0x3000 <= o <= 0x303F      # CJK 统一/标点
+                or 0xFF00 <= o <= 0xFFEF                          # 全角
+                or ch.isalnum() or ch in "，。、；：？！《》（）“”‘’—…·%.-/ "
+                or ch == "\n" or ch == "\r"):
+            cur.append(ch)
+        else:
+            if len(cur) >= 8:                                     # 丢弃短噪声段
+                kept.append("".join(cur))
+            cur = []
+    if len(cur) >= 8:
+        kept.append("".join(cur))
+    return "\n".join(kept)
+
+
 def extract_text_from_file(path) -> str:
-    """按扩展名自动分派 PDF/DOCX 文本提取。"""
+    """按扩展名自动分派 PDF/DOCX/DOC 文本提取。"""
     p = str(path).lower()
     if p.endswith(".pdf"):
         return extract_text_from_pdf(path)
-    if p.endswith((".docx", ".doc")):
+    if p.endswith(".doc"):
+        return extract_text_from_doc(path)
+    if p.endswith(".docx"):
         return extract_text_from_docx(path)
     raise ValueError(f"不支持的文件类型: {path}")
 

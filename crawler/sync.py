@@ -151,7 +151,7 @@ def sync_source(
                 low = url.lower()
                 if low.endswith((".pdf", ".docx", ".doc")):
                     # 附件正文（PDF/Word）：下载后提取文本，标题用列表页名称
-                    ext = ".pdf" if low.endswith(".pdf") else ".docx"
+                    ext = low[low.rfind("."):]
                     file_path = DATA_DIR / "raw" / "files" / (
                         content_hash(url) + ext
                     )
