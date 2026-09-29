@@ -22,6 +22,10 @@
   <div class="layout">
     <!-- 左侧导航树 -->
     <aside class="sidebar">
+      <div class="sidebar-title">探索</div>
+      <nav class="level-nav">
+        <a id="navGraph">🕸 知识图谱</a>
+      </nav>
       <div class="sidebar-title">效力级别</div>
       <nav id="levelNav" class="level-nav"></nav>
       <div class="sidebar-title">状态</div>
@@ -40,7 +44,7 @@
       <!-- 视图：欢迎页 -->
       <section id="viewHome" class="view">
         <h1>证券法律法规知识库</h1>
-        <p class="muted">左侧选择效力级别浏览法规，顶部搜索法条，底部对话框直接提问研究。</p>
+        <p class="muted">左侧选择效力级别浏览法规或打开知识图谱，顶部搜索法条，右下角 💬 悬浮对话框直接提问研究。</p>
       </section>
       <!-- 视图：法规列表 -->
       <section id="viewList" class="view hidden">
@@ -74,20 +78,39 @@
         <div class="list-header"><h2 id="searchTitle"></h2><span id="searchCount" class="muted"></span></div>
         <div id="searchResults"></div>
       </section>
+      <!-- 视图：知识图谱 -->
+      <section id="viewGraph" class="view hidden">
+        <div class="list-header">
+          <h2>知识图谱</h2>
+          <span id="graphMeta" class="muted"></span>
+        </div>
+        <div id="graphBoards" class="graph-boards"></div>
+        <div class="graph-wrap">
+          <canvas id="graphCanvas"></canvas>
+          <div id="graphLegend" class="graph-legend"></div>
+          <div id="graphTip" class="graph-tip hidden"></div>
+          <div class="graph-help muted">滚轮缩放 · 拖拽平移 · 悬停查看 · 点击节点进入法规详情 · 点击图例聚焦层级</div>
+        </div>
+      </section>
     </main>
   </div>
 
-  <!-- 底部全局对话栏 -->
-  <footer class="chatbar">
+  <!-- 悬浮对话：折叠圆钮 + 展开卡片 -->
+  <button id="chatFab" title="对话研究">💬<span id="chatDot" class="chat-dot hidden"></span></button>
+  <div id="chatPanel" class="chat-panel hidden">
+    <div class="chat-panel-head" id="chatPanelHead">
+      <span>💬 对话研究</span>
+      <button id="btnMinChat" class="btn-icon-flat" title="收起">−</button>
+    </div>
     <div id="chatLog" class="chat-log">
-      <div class="chat-hint">对话研究：输入证券法律法规问题（如"内幕交易的构成要件和处罚？"），回答将附法条引用，点击引用可跳转原文。</div>
+      <div class="chat-hint">输入证券法律法规问题（如"内幕交易的构成要件和处罚？"），回答将附法条引用，点击引用可跳转原文。</div>
     </div>
     <div class="chat-input-row">
       <button id="btnClearChat" class="btn-small" title="清空对话">🗑</button>
       <input id="chatInput" type="text" placeholder="输入法律法规问题，回车发送…">
       <button id="btnSend" class="btn-primary">发送</button>
     </div>
-  </footer>
+  </div>
 
   <!-- 模型配置弹窗 -->
   <div id="settingsModal" class="modal hidden">
@@ -108,5 +131,6 @@
   </div>
 
   <script src="/static/app.js"></script>
+  <script src="/static/graph.js"></script>
 </body>
 </html>

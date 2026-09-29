@@ -3,6 +3,7 @@ import re
 import sqlite3
 from datetime import datetime
 
+from app.digest import law_digest
 from app.llm import LLMClient
 
 WIKI_PROMPT = """你是证券法律法规专家。为以下法规撰写一篇 wiki 式解读文章，用 Markdown 输出。
@@ -26,12 +27,7 @@ WIKI_PROMPT = """你是证券法律法规专家。为以下法规撰写一篇 wi
 
 
 def _digest(db: sqlite3.Connection, law_id: int, max_chars: int = 6000) -> str:
-    text = db.execute(
-        "SELECT full_text FROM laws WHERE id=?", (law_id,)
-    ).fetchone()["full_text"] or ""
-    if len(text) <= max_chars:
-        return text
-    return text[: max_chars * 2 // 3] + "\n……（中略）……\n" + text[-max_chars // 3:]
+    return law_digest(db, law_id, max_chars)
 
 
 def _relation_context(db: sqlite3.Connection, law_id: int) -> str:

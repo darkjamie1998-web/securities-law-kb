@@ -21,25 +21,38 @@ def _config_path(data_dir: pathlib.Path) -> pathlib.Path:
 
 
 def load_config(data_dir: pathlib.Path) -> dict:
-    """读取配置，缺失字段用默认值补齐。"""
+    """读取配置，缺失字段用默认值补齐。
+
+    文件损坏（非法 JSON）时退回默认配置而非抛异常——配置读取被几乎所有
+    端点调用，抛 JSONDecodeError 会让整个服务 500。
+    """
     cfg = dict(DEFAULT)
     p = _config_path(data_dir)
     if p.exists():
-        saved = json.loads(p.read_text(encoding="utf-8"))
-        for k, v in saved.items():
-            if k in DEFAULT:
-                cfg[k] = v
+        try:
+            saved = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            saved = {}
+        if isinstance(saved, dict):
+            for k, v in saved.items():
+                if k in DEFAULT:
+                    cfg[k] = v
     return cfg
 
 
 def save_config(data_dir: pathlib.Path, cfg: dict) -> dict:
-    """保存配置（仅保留已知字段），返回归一化后的完整配置。"""
+    """保存配置（仅保留已知字段），返回归一化后的完整配置。
+
+    临时文件 + os.replace 原子替换：写盘途中崩溃/断电不会留下半个 JSON。
+    """
     clean = {k: cfg.get(k, DEFAULT[k]) for k in DEFAULT}
     data_dir = pathlib.Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
-    _config_path(data_dir).write_text(
+    tmp = _config_path(data_dir).with_suffix(".json.tmp")
+    tmp.write_text(
         json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    tmp.replace(_config_path(data_dir))
     return clean
 
 

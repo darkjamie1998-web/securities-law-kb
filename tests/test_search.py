@@ -39,8 +39,57 @@ def db(tmp_path):
 class MockLLM:
     """embed 返回简单向量：与含"内幕"的文本同向。"""
 
+    embedding_model = "mock-embed"  # hybrid_search 据此判断是否走向量路
+
     def embed(self, texts, batch=64):
         return [[1.0, 0.0] if "内幕" in t else [0.0, 1.0] for t in texts]
+
+
+# ---- 短词兜底：trigram FTS 只支持 ≥3 字查询，"税"这类单字/双字走 LIKE ----
+
+@pytest.fixture()
+def tax_db(tmp_path):
+    conn = get_db(tmp_path / "tax.db")
+    init_db(conn)
+    for i, (title, text) in enumerate([
+        ("增值税法", "第一条 税收征收管理。第二条 税率设置。"),
+        ("证券法", "第一条 证券发行。第二条 税务登记事项说明。"),
+        ("公司法", "第一条 公司设立。第二条 股东权利。"),
+    ]):
+        cur = conn.execute(
+            "INSERT INTO laws(title, level, content_hash) VALUES(?,?,?)",
+            (title, "法律", f"h{i}"))
+        conn.execute(
+            "INSERT INTO articles(law_id, article_no, text) VALUES(?,?,?)",
+            (cur.lastrowid, "第一条", text))
+    conn.commit()
+    return conn
+
+
+def test_single_char_query_hits_via_like(tax_db):
+    """单字"税"：FTS 无法命中（trigram 需 ≥3 字），LIKE 兜底应命中含税条文。"""
+    results = hybrid_search(tax_db, None, "税", top_k=10)
+    titles = {r["title"] for r in results}
+    assert "增值税法" in titles and "证券法" in titles
+    assert "公司法" not in titles   # 不含税字的条文不应出现
+
+
+def test_two_char_query_hits_via_like(tax_db):
+    """双字"税收"同样走 LIKE 兜底。"""
+    results = hybrid_search(tax_db, None, "税收", top_k=10)
+    assert any("税收" in r["text"] for r in results)
+
+
+def test_like_ranks_by_hit_count(tax_db):
+    """LIKE 兜底按出现次数排序：税字出现更多的条文排前。"""
+    results = hybrid_search(tax_db, None, "税", top_k=10)
+    assert results[0]["title"] == "增值税法"  # 3 次税 > 证券法 1 次
+
+
+def test_three_char_still_uses_fts(tax_db):
+    """≥3 字查询仍走 FTS 主路（兜底不改变原有行为）。"""
+    results = hybrid_search(tax_db, None, "公司设立", top_k=10)
+    assert any("公司设立" in r["text"] for r in results)
 
 
 def test_keyword_only_hits(db):
@@ -59,6 +108,8 @@ def test_hybrid_fusion(db):
 
 def test_degrades_to_keyword_when_embed_fails(db):
     class BrokenLLM:
+        embedding_model = "mock-embed"
+
         def embed(self, texts, batch=64):
             raise RuntimeError("no api")
 

@@ -37,6 +37,7 @@ body {
 .brand { font-size: 17px; font-weight: 600; white-space: nowrap; }
 .topbar-center { flex: 1; display: flex; justify-content: center; }
 .topbar-center input {
+  width: 560px;
   width: min(560px, 100%);
   padding: 7px 12px;
   border: none;
@@ -187,13 +188,78 @@ body {
 .search-hit .frag { font-size: 13px; margin-top: 4px; }
 mark { background: #ffe58f; padding: 0 2px; }
 
-/* 底部对话栏 */
-.chatbar {
-  flex: none;
-  border-top: 1px solid var(--border);
-  background: var(--panel);
-  padding: 10px 16px;
+/* 悬浮对话：折叠圆钮 + 悬浮卡片 */
+#chatFab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(26, 75, 140, 0.4);
+  z-index: 60;
+  transition: transform 0.15s, background 0.15s;
 }
+#chatFab:hover { transform: scale(1.08); background: var(--primary-dark); }
+.chat-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #e34948;
+  border: 2px solid #fff;
+}
+.chat-dot.hidden { display: none; }
+.chat-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 92px;
+  width: 400px;                                    /* 旧浏览器回退 */
+  height: 550px;                                  /* 旧浏览器回退 */
+  width: min(400px, calc(100vw - 48px));          /* 新浏览器自适应 */
+  height: min(550px, calc(100vh - 140px));
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 44px rgba(0,0,0,0.22);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 61;
+}
+.chat-panel.hidden { display: none; }
+.chat-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+.btn-icon-flat {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+.btn-icon-flat:hover { background: rgba(255,255,255,0.2); }
+.chat-panel .chat-log { flex: 1; max-height: none; padding: 10px 14px; margin-bottom: 0; }
+.chat-panel .chat-input-row { padding: 10px 14px; border-top: 1px solid var(--border); }
 .chat-log {
   max-height: 240px;
   overflow-y: auto;
@@ -228,6 +294,97 @@ mark { background: #ffe58f; padding: 0 2px; }
   outline: none;
 }
 .chat-input-row input:focus { border-color: var(--primary); }
+
+/* 知识图谱 */
+.graph-boards {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.gb-chip {
+  font-size: 12px;
+  padding: 3px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  cursor: pointer;
+  user-select: none;
+}
+.gb-chip:hover { border-color: var(--primary); color: var(--primary); }
+.gb-chip.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+.graph-wrap {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  height: calc(100vh - 210px);
+  min-height: 420px;
+  overflow: hidden;
+}
+#graphCanvas { width: 100%; height: 100%; display: block; cursor: grab; }
+#graphCanvas.dragging { cursor: grabbing; }
+.graph-legend {
+  position: absolute;
+  left: 12px;
+  bottom: 34px;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 5;
+}
+.graph-legend .lg-item { display: flex; align-items: center; gap: 7px; cursor: pointer; padding: 1px 3px; border-radius: 4px; }
+.graph-legend .lg-item:hover { background: #eef1f5; }
+.graph-legend .lg-item.dim { opacity: 0.38; }
+.graph-legend .lg-swatch { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+.graph-legend .lg-count { color: var(--muted); font-size: 11px; }
+.graph-tip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(36, 41, 47, 0.94);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.5;
+  border-radius: 6px;
+  padding: 6px 10px;
+  max-width: 280px;
+  z-index: 6;
+}
+.graph-tip.hidden { display: none; }
+.graph-help {
+  position: absolute;
+  right: 12px;
+  bottom: 34px;
+  font-size: 11px;
+  z-index: 5;
+}
+
+/* 关联法规：分组与筛选 */
+.rel-filter { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 10px; }
+.rel-filter .rf-chip {
+  font-size: 11px;
+  padding: 1px 9px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  cursor: pointer;
+}
+.rel-filter .rf-chip.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+.rel-group-title { font-size: 12px; color: var(--muted); margin: 8px 0 4px; font-weight: 600; }
+.rel-count-badge {
+  font-size: 11px;
+  color: var(--primary);
+  background: #dce7f5;
+  border-radius: 9px;
+  padding: 0 7px;
+  margin-left: 6px;
+  font-weight: 400;
+}
 .btn-primary {
   background: var(--primary);
   color: #fff;
@@ -273,6 +430,7 @@ mark { background: #ffe58f; padding: 0 2px; }
   background: var(--panel);
   border-radius: 12px;
   padding: 24px 28px;
+  width: 480px;
   width: min(480px, 92vw);
   box-shadow: 0 8px 40px rgba(0,0,0,0.2);
 }

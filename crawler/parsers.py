@@ -34,13 +34,27 @@ def content_hash(full_text: str) -> str:
 
 
 def extract_text_from_html(html: str) -> str:
-    """HTML → 纯文本（去 script/style，压缩空行）。"""
+    """HTML → 纯文本（去 script/style，压缩空行）。
+
+    lxml 对个别官方站的旧式 HTML（gov.cn 等）会静默截断 DOM，只产出导航区；
+    结果异常短时回退 html.parser 重新解析（更宽容，仅慢一点）。
+    """
     soup = BeautifulSoup(html, "lxml")
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
     text = soup.get_text(separator="\n")
     lines = [ln.strip() for ln in text.splitlines()]
-    return "\n".join(ln for ln in lines if ln)
+    out = "\n".join(ln for ln in lines if ln)
+    if len(out) * 40 < len(html):   # 提取文本 < 原文的 1/40：疑似解析截断
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        text2 = soup.get_text(separator="\n")
+        lines2 = [ln.strip() for ln in text2.splitlines()]
+        out2 = "\n".join(ln for ln in lines2 if ln)
+        if len(out2) > len(out):
+            return out2
+    return out
 
 
 def extract_text_from_pdf(pdf_path) -> str:

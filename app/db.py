@@ -40,6 +40,19 @@ CREATE TABLE IF NOT EXISTS relations (
     UNIQUE(from_id, to_id, rel_type)
 );
 
+-- 关系抽取尝试标记：完成抽取（无论是否产出关系）都记录，
+-- 避免天然无关系的法规被批量脚本无限重试烧 LLM 调用。
+CREATE TABLE IF NOT EXISTS relation_extractions (
+    law_id INTEGER PRIMARY KEY REFERENCES laws(id),
+    status TEXT NOT NULL,           -- ok 有产出 / empty 无关系 / failed 调用失败
+    attempts INTEGER NOT NULL DEFAULT 1,
+    extracted INTEGER DEFAULT 0,
+    saved INTEGER DEFAULT 0,
+    unmatched INTEGER DEFAULT 0,
+    note TEXT,
+    attempted_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS wiki_pages (
     id INTEGER PRIMARY KEY,
     law_id INTEGER NOT NULL UNIQUE REFERENCES laws(id),
@@ -90,8 +103,9 @@ END;
 
 
 def get_db(path) -> sqlite3.Connection:
-    """打开 SQLite 连接：Row 行工厂 + 外键约束开启。path 可为 Path 或 ':memory:'。"""
-    conn = sqlite3.connect(str(path))
+    """打开 SQLite 连接：Row 行工厂 + 外键约束开启。path 可为 Path 或 ':memory:'。
+    timeout=30：多进程并发写（服务 + 图谱生成脚本）时的 busy 等待上限。"""
+    conn = sqlite3.connect(str(path), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn

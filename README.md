@@ -32,21 +32,31 @@ python -m venv .venv
 
 ```bash
 .venv/Scripts/python.exe -m crawler.sync                        # 每日增量（建议每日 1 次）
+.venv/Scripts/python.exe -m crawler.targeted_import --dry-run   # 定向补充法律（清单 crawler/targets.yaml）
 .venv/Scripts/python.exe -m app.embed                           # 新法条向量化
-.venv/Scripts/python.exe -m app.relations --pending 10          # 新法规关系抽取
-.venv/Scripts/python.exe -m pytest tests/ -v                    # 运行测试（38 个）
+relations.bat                                                   # 图谱全量生成（推荐：独立窗口，日志 data/relations_forever.log）
+.venv/Scripts/python.exe -m app.relations --pending 10          # 小批量关系抽取
+.venv/Scripts/python.exe -m pytest tests/ -v                    # 运行测试（59 个）
 ```
+
+**定向补充**（`crawler/targeted_import.py`）：按 `crawler/targets.yaml` 的官方刊载页 URL 清单抓取入库（标题锚定解析 + 限频合规），适合补充交易所栏目未覆盖的通用商法经济法。找到新的全文页 URL 后加入清单重跑即可，`--dry-run` 先验证解析效果。
+
+`run_relations_forever.py`（relations.bat 调用它）内置可靠性机制：**实例文件锁**（同机防双实例重复烧 LLM）、**看门狗**（连续 45 分钟无产出自动退出，可配合外部重启）、**完成标记表**（天然无关系的法规抽取一次即完成，不再无限重试；失败的法规最多自动重试 3 次）。中断后重跑自动续。
 
 ## 功能地图
 
 | 功能 | 入口 |
 |------|------|
 | 法规浏览（效力级别/状态筛选） | 左侧导航树 |
-| 法条搜索（关键词 + 向量混合，RRF 融合） | 顶部搜索框 |
-| 法规详情 + 条文 + 关联法规 | 点击法规卡片 |
+| 法条搜索（关键词 + 向量混合，RRF 融合；≥3 字走 FTS5 trigram，短词自动 LIKE 兜底） | 顶部搜索框 |
+| 法规详情 + 条文 + 双向关联（分组/类型筛选） | 点击法规卡片 |
+| 知识图谱（全景 + 16 个业务板块子图，径向分层 Canvas） | 左侧"探索 → 🕸 知识图谱"，顶部板块 chips 切换 |
 | Wiki 解读（LLM 按需生成，缓存复用） | 详情页"生成/刷新解读" |
-| 对话研究（Agent 多轮检索 + 引用溯源） | 底部对话栏 |
+| 对话研究（Agent 多轮检索 + 引用溯源） | 右下角 💬 悬浮对话（可折叠/拖动） |
 | 大模型配置（OpenAI 兼容） | 右上 ⚙ 配置 |
+
+图谱数据完整性可审计：`python -m app.audit`（对称冗余/孤立节点/幽灵标记，
+`--fix` 可修复历史丢边痕迹）。
 
 ## 反爬与合规
 
@@ -61,7 +71,7 @@ app/       服务层（FastAPI、检索、对话、wiki、配置）
 crawler/   采集层（来源配置、限频爬虫、解析、同步）
 web/       前端单页（原生 HTML/CSS/JS，无外部依赖）
 data/      运行时数据（knowledge.db、config.json、原始留档）— 不入 git
-tests/     38 个单元测试
+tests/     50 个单元测试
 ```
 
 ## 已知限制

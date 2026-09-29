@@ -1,34 +1,33 @@
 @echo off
-chcp 65001 >nul
 cd /d "%~dp0"
 
 echo ================================================
-echo   å…³è”å›¾è°±åˆ†æ‰¹ç”Ÿæˆï¼ˆæ¯æ‰¹ 50 éƒ¨ï¼‰
-echo   ç‹¬ç«‹çª—å£è¿è¡Œï¼Œå…³é—­æœ¬çª—å£å³åœæ­¢
-echo   è¿›åº¦æ—¥å¿—: data\relations_batch.log
+echo   ¹ØÁªÍ¼Æ×È«Á¿Éú³É£¨¶ÀÁ¢´°¿ÚÔËĞĞ£©
+echo   ½ø¶ÈÈÕÖ¾: data\relations_forever.log
+echo   ÒÑ³éÈ¡¹ıµÄ·¨¹æ×Ô¶¯Ìø¹ı£¬¿ÉËæÊ±ÖĞ¶ÏÖØÅÜ
 echo ================================================
 echo.
 
 if not exist ".venv\Scripts\python.exe" (
-    echo [é”™è¯¯] æœªæ‰¾åˆ° .venv è™šæ‹Ÿç¯å¢ƒ
+    echo [´íÎó] Î´ÕÒµ½ .venv ĞéÄâ»·¾³
     pause
     exit /b 1
 )
 
-REM è¿ç»­åˆ†æ‰¹ï¼šæ¯æ‰¹ 50 éƒ¨ï¼Œç›´åˆ°å‰©ä½™ä¸è¶³ï¼ˆæ—  pending æ—¶è„šæœ¬è‡ªåŠ¨ç»“æŸï¼‰
-:loop
-.venv\Scripts\python.exe -m app.relations --pending 50
-if errorlevel 1 (
+REM single source of logic: run_relations_forever.py
+REM (instance lock + watchdog + retry cap), output to log file (overwrite per run)
+REM watchdog exit code 3 = gateway hang / no progress -> auto restart after pause
+
+:run
+.venv\Scripts\python.exe run_relations_forever.py --batch 50 > data\relations_forever.log 2>&1
+if errorlevel 3 (
     echo.
-    echo [æç¤º] æœ¬æ‰¹å‡ºç°é”™è¯¯ï¼Œ10 ç§’åé‡è¯•ä¸‹ä¸€æ‰¹ï¼ˆå·²å¤„ç†çš„ä¼šè‡ªåŠ¨è·³è¿‡ï¼‰...
-    timeout /t 10 /nobreak >nul
+    echo [watchdog] runner ÍË³ö£¨Íø¹Ø¹ÒÆğ»ò³¤Ê±¼äÎŞ½øÕ¹£©£¬10 ·ÖÖÓºó×Ô¶¯ÖØÆô...
+    echo ÍêÈ«Í£Ö¹ÇëÖ±½Ó¹Ø±Õ±¾´°¿Ú¡£
+    timeout /t 600 /nobreak >NUL
+    goto run
 )
-REM æ£€æŸ¥æ˜¯å¦è¿˜æœ‰æœªå¤„ç†æ³•è§„
-.venv\Scripts\python.exe -c "import sqlite3,sys; db=sqlite3.connect('data/knowledge.db'); done=db.execute('SELECT count(DISTINCT a.law_id) FROM relations r JOIN articles a ON a.id=r.from_id').fetchone()[0]; total=db.execute('SELECT count(*) FROM laws').fetchone()[0]; print(f'è¿›åº¦: {done}/{total}'); sys.exit(0 if done<total else 1)"
-if not errorlevel 1 goto loop
 
 echo.
-echo ================================================
-echo   å…¨éƒ¨æ³•è§„çš„å…³è”å›¾è°±ç”Ÿæˆå®Œæˆï¼
-echo ================================================
+echo ÒÑÍê³É»òÊÖ¶¯Í£Ö¹¡£Ïê¼û data\relations_forever.log
 pause

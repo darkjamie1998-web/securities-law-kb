@@ -79,3 +79,30 @@ def test_cosine():
     assert cosine([1, 0], [0, 1]) == pytest.approx(0.0)
     assert cosine([1, 0], [-1, 0]) == pytest.approx(-1.0)
     assert cosine([], []) == 0.0
+
+
+def test_chat_hard_timeout(monkeypatch):
+    """httpx 挂起（库级超时失效）时，应用层看门狗触发 LLMError 而非永久阻塞。"""
+    import time
+
+    def hang_post(*a, **k):
+        time.sleep(10)
+
+    monkeypatch.setattr("httpx.post", hang_post)
+    client = LLMClient(CFG, hard_timeout=0.5)
+    t0 = time.time()
+    with pytest.raises(LLMError, match="硬超时"):
+        client.chat([{"role": "user", "content": "hi"}])
+    assert time.time() - t0 < 5  # 没等到挂起的 10s 就返回了
+
+
+def test_chat_hard_timeout_default_off_in_sync(monkeypatch):
+    """默认配置下普通调用行为不变（正常响应即返回）。"""
+    monkeypatch.setattr(
+        "httpx.post",
+        lambda *a, **k: FakeResp(payload={
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}]
+        }),
+    )
+    client = LLMClient(CFG)
+    assert client.chat([{"role": "user", "content": "hi"}])["content"] == "ok"

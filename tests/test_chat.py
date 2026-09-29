@@ -25,6 +25,8 @@ def db(tmp_path):
 class ScriptedLLM:
     """按脚本依次返回：第一轮调工具，第二轮给最终回答。"""
 
+    embedding_model = "mock-embed"  # hybrid_search 据此判断是否走向量路
+
     def __init__(self, script):
         self.script = list(script)
         self.calls = 0
