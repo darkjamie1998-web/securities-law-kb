@@ -39,6 +39,17 @@ def rc(src: Path, dst: Path, *extra):
     return r.returncode
 
 
+def _force_rmtree(path: Path):
+    """rmtree，自动清掉只读属性再删（git objects 文件默认只读，Windows 下 unlink 会拒绝访问）"""
+    import stat
+
+    def onexc(func, p, exc):
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+
+    shutil.rmtree(path, onexc=onexc)
+
+
 def main():
     skip_zip = "--skip-zip" in sys.argv
     if not (SRC / "app" / "main.py").exists():
@@ -50,7 +61,7 @@ def main():
 
     print(f"[1/6] 清理目标目录 {DST}")
     if DST.exists():
-        shutil.rmtree(DST)
+        _force_rmtree(DST)
     DST.mkdir(parents=True)
 
     print("[2/6] 复制项目文件（git 已提交状态的工作区）")
