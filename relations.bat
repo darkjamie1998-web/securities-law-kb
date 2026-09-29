@@ -1,6 +1,9 @@
 @echo off
 cd /d "%~dp0"
 
+REM python console output as GBK (cmd codepage), else CJK prints garbled
+set PYTHONIOENCODING=gbk
+
 echo ================================================
 echo   关联图谱全量生成（独立窗口运行）
 echo   进度日志: data\relations_forever.log
@@ -12,7 +15,8 @@ set PY=.venv\Scripts\python.exe
 if exist "runtime\python.exe" set PY=runtime\python.exe
 
 if not exist "%PY%" (
-    echo [错误] 未找到 Python 运行时 runtime\ 或 .venv\
+    echo [错误] 未找到本地运行时 runtime\ 或 .venv\
+    echo        请先双击 环境自检.bat 完成环境配置
     pause
     exit /b 1
 )

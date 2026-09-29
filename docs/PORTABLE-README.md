@@ -14,6 +14,11 @@
 3. 开始使用：左侧导航浏览法规，顶部搜索框检索，右下角 💬 对话研究
 ```
 
+**runtime\ 目录丢失或未随包分发？** 环境自检会自动转配：检测到本机装有 Python 3.9+（`py` / `python` 命令任一）时，
+自动在**项目文件夹内**创建 `.venv` 虚拟环境并安装全部依赖（经 `tools/setup_env.py`，需要网络；
+内网可加镜像参数）。**全程不修改系统 PATH、不装全局包**。本机连 Python 都没有时，
+自检会给出两条出路（从 zip 恢复 runtime\ 目录，或先装 Python 再重跑自检）。
+
 **首次配置大模型**（可选）：复制 `config.example.json` 为 `data\config.json`，填入 OpenAI 兼容 API
 的地址/Key/模型名（或启动后在页面右上 ⚙ 填写）。
 
@@ -60,8 +65,9 @@ tests\      单元测试
 
 | 症状 | 处理 |
 |------|------|
-| 启动面板报"未找到 Python 运行时" | `runtime\` 目录缺失或被杀毒软件隔离，重新解压完整包 |
-| 自检依赖导入失败 | `runtime\Lib\site-packages` 被破坏；可按 `requirements-full.txt` 重装 |
+| 自检提示"未找到本地运行时" | 正常现象：有系统 Python 时会**自动转配**项目内 `.venv`（需网络）；无 Python 则按提示恢复 `runtime\` 或先装 Python |
+| 自动配置时依赖安装失败（无网络/内网源不可达） | `python tools/setup_env.py --mirror <内网pip镜像地址>`；或从 zip 恢复 `runtime\`（零网络） |
+| 自检依赖导入失败 | `runtime\Lib\site-packages` 被破坏时删除 `runtime\` 走自动配置；`.venv` 场景删除 `.venv\` 后重跑自检 |
 | 页面能开但搜索报错 | 检查 `data\knowledge.db` 是否存在（自检会查）；从原包恢复 |
 | LLM 问答无响应 | 检查 `data\config.json` 的 api_base/api_key；网关需内网可达 |
 | 关联图谱很久不更新 | `relations.bat` 需要配置好 LLM 且网关可用；看 `data\relations_forever.log` |

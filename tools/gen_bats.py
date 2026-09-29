@@ -1,11 +1,19 @@
 # tools/gen_bats.py — 生成 GBK+CRLF 编码的 bat 启动件（项目规范：cmd 原生代码页，勿用会写 UTF-8 的工具直接编辑 bat）
 # 用法: python tools/gen_bats.py
+#
+# 环境探测优先级（三个 bat 一致）：
+#   runtime\python.exe（便携版）> .venv\Scripts\python.exe（开发版/自动配置版）
+#   两者皆无 → 环境自检.bat 用系统 Python（py -3 / python / python3）跑 tools/setup_env.py
+#   自动创建项目内 .venv（绝不改系统 PATH / 不装全局包）
 import os
 
 BATS = {}
 
 BATS["启动面板.bat"] = r'''@echo off
 cd /d "%~dp0"
+
+REM python console output as GBK (cmd codepage), else CJK prints garbled
+set PYTHONIOENCODING=gbk
 
 echo ================================================
 echo   证券法律法规知识库
@@ -18,8 +26,17 @@ set PY=.venv\Scripts\python.exe
 if exist "runtime\python.exe" set PY=runtime\python.exe
 
 if not exist "%PY%" (
-    echo [错误] 未找到 Python 运行时 runtime\ 或 .venv\
-    echo        便携版自带 runtime\，开发版请先: python -m venv .venv ^&^& .venv\Scripts\pip install -r requirements-full.txt
+    echo [提示] 未找到本地运行时，转入环境自检/自动配置...
+    echo.
+    call "环境自检.bat"
+)
+
+REM re-detect after autocfg (env may now have .venv)
+set PY=.venv\Scripts\python.exe
+if exist "runtime\python.exe" set PY=runtime\python.exe
+
+if not exist "%PY%" (
+    echo [错误] 环境仍未就绪，请按上方自检提示处理后重新双击本脚本
     pause
     exit /b 1
 )
@@ -49,19 +66,64 @@ pause
 BATS["环境自检.bat"] = r'''@echo off
 cd /d "%~dp0"
 
+REM python console output as GBK (cmd codepage), else CJK prints garbled
+set PYTHONIOENCODING=gbk
+
 echo ================================================
 echo   环境自检（便携版 / 开发版通用）
 echo ================================================
 echo.
 
-set PY=.venv\Scripts\python.exe
+:detect
+set PY=
 if exist "runtime\python.exe" set PY=runtime\python.exe
+if exist ".venv\Scripts\python.exe" set PY=.venv\Scripts\python.exe
+if not "%PY%"=="" goto checks
 
+echo [提示] 未找到本地运行时（runtime\ 或 .venv\），尝试自动配置...
+echo.
+set SETUP=
+where py >NUL 2>NUL
+if errorlevel 1 goto try_python
+set SETUP=py -3
+goto autocfg
+
+:try_python
+where python >NUL 2>NUL
+if errorlevel 1 goto try_python3
+set SETUP=python
+goto autocfg
+
+:try_python3
+where python3 >NUL 2>NUL
+if errorlevel 1 goto nopy
+set SETUP=python3
+goto autocfg
+
+:autocfg
+echo ------------------------------------------------
+echo   检测到系统 Python（%SETUP%）
+echo   自动创建项目内 .venv 虚拟环境并安装依赖
+echo   仅在项目文件夹内操作，不修改系统环境
+echo ------------------------------------------------
+%SETUP% tools\setup_env.py
+if errorlevel 1 goto fail
+echo.
+echo [成功] .venv 配置完成，重新自检...
+echo.
+goto detect
+
+:nopy
+echo [失败] 本机未找到任何 Python（py / python / python3 均不可用）
+echo.
+echo 两条路任选其一：
+echo   1. 从便携包 zip 重新解压完整 runtime\ 目录（推荐，零安装零网络）
+echo   2. 安装 Python 3.9 或更高版本（推荐 3.14，安装时勾选 Add to PATH）
+echo      安装完成后重新双击本脚本，会自动配置项目内 .venv
+goto fail
+
+:checks
 echo [1/3] Python 运行时: %PY%
-if not exist "%PY%" (
-    echo   [失败] 未找到 Python 运行时
-    goto fail
-)
 %PY% -c "import sys; print('   Python', sys.version.split()[0], 'OK')"
 if errorlevel 1 goto fail
 %PY% -c "import fastapi, bs4, httpx, yaml, lxml; print('   核心依赖导入 OK')"
@@ -99,13 +161,16 @@ exit /b 0
 
 :fail
 echo.
-echo 自检未通过，请阅读 README.md 排查。
+echo 自检未通过，请按上方提示处理，或阅读 README.md 故障排查章节。
 pause
 exit /b 1
 '''
 
 BATS["relations.bat"] = r'''@echo off
 cd /d "%~dp0"
+
+REM python console output as GBK (cmd codepage), else CJK prints garbled
+set PYTHONIOENCODING=gbk
 
 echo ================================================
 echo   关联图谱全量生成（独立窗口运行）
@@ -118,7 +183,8 @@ set PY=.venv\Scripts\python.exe
 if exist "runtime\python.exe" set PY=runtime\python.exe
 
 if not exist "%PY%" (
-    echo [错误] 未找到 Python 运行时 runtime\ 或 .venv\
+    echo [错误] 未找到本地运行时 runtime\ 或 .venv\
+    echo        请先双击 环境自检.bat 完成环境配置
     pause
     exit /b 1
 )

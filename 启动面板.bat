@@ -1,6 +1,9 @@
 @echo off
 cd /d "%~dp0"
 
+REM python console output as GBK (cmd codepage), else CJK prints garbled
+set PYTHONIOENCODING=gbk
+
 echo ================================================
 echo   证券法律法规知识库
 echo   启动中... 服务地址 http://localhost:8000
@@ -12,8 +15,17 @@ set PY=.venv\Scripts\python.exe
 if exist "runtime\python.exe" set PY=runtime\python.exe
 
 if not exist "%PY%" (
-    echo [错误] 未找到 Python 运行时 runtime\ 或 .venv\
-    echo        便携版自带 runtime\，开发版请先: python -m venv .venv ^&^& .venv\Scripts\pip install -r requirements-full.txt
+    echo [提示] 未找到本地运行时，转入环境自检/自动配置...
+    echo.
+    call "环境自检.bat"
+)
+
+REM re-detect after autocfg (env may now have .venv)
+set PY=.venv\Scripts\python.exe
+if exist "runtime\python.exe" set PY=runtime\python.exe
+
+if not exist "%PY%" (
+    echo [错误] 环境仍未就绪，请按上方自检提示处理后重新双击本脚本
     pause
     exit /b 1
 )
