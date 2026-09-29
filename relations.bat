@@ -8,8 +8,11 @@ echo   已抽取过的法规自动跳过，可随时中断重跑
 echo ================================================
 echo.
 
-if not exist ".venv\Scripts\python.exe" (
-    echo [错误] 未找到 .venv 虚拟环境
+set PY=.venv\Scripts\python.exe
+if exist "runtime\python.exe" set PY=runtime\python.exe
+
+if not exist "%PY%" (
+    echo [错误] 未找到 Python 运行时 runtime\ 或 .venv\
     pause
     exit /b 1
 )
@@ -19,7 +22,7 @@ REM (instance lock + watchdog + retry cap), output to log file (overwrite per ru
 REM watchdog exit code 3 = gateway hang / no progress -> auto restart after pause
 
 :run
-.venv\Scripts\python.exe run_relations_forever.py --batch 50 > data\relations_forever.log 2>&1
+%PY% run_relations_forever.py --batch 50 > data\relations_forever.log 2>&1
 if errorlevel 3 (
     echo.
     echo [watchdog] runner 退出（网关挂起或长时间无进展），10 分钟后自动重启...
