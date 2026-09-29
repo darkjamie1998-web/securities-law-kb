@@ -34,9 +34,18 @@ SYSTEM_PROMPT = """你是证券法律法规研究专家。回答用户关于证�
 MAX_ROUNDS = 5
 
 
+def _safe_top_k(v) -> int:
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return 8
+    return max(1, min(50, n))
+
+
 def _run_tool(db, llm, args: dict) -> str:
     """执行 search_laws，返回压缩后的检索结果文本。"""
-    results = hybrid_search(db, llm, args.get("query", ""), top_k=int(args.get("top_k", 8)))
+    query = args.get("query") if isinstance(args.get("query"), str) else ""
+    results = hybrid_search(db, llm, query, top_k=_safe_top_k(args.get("top_k", 8)))
     if not results:
         return "（未检索到相关法条）"
     lines = []
@@ -77,8 +86,11 @@ def agent_chat(db, llm, messages: list[dict], max_rounds: int = MAX_ROUNDS) -> d
                 try:
                     args = json.loads(fn["arguments"] or "{}")
                 except json.JSONDecodeError:
-                    args = {"query": ""}
-                searches.append(args.get("query", ""))
+                    args = {}
+                if not isinstance(args, dict):  # LLM 偶发返回数组/字符串
+                    args = {}
+                q = args.get("query") if isinstance(args.get("query"), str) else ""
+                searches.append(q)  # 与 _run_tool 用同一规范化值
                 output = _run_tool(db, llm, args)
             else:
                 output = f"未知工具：{fn['name']}"

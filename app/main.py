@@ -1,5 +1,6 @@
 # app/main.py — FastAPI 入口：API 端点 + 静态页面挂载
 import sqlite3
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -10,23 +11,32 @@ from pydantic import BaseModel
 from app.chat import agent_chat
 from app.config import load_config, save_config
 from app.db import get_db, init_db
+from app.graph import build_graph
 from app.llm import LLMClient, LLMError
 from app.search import hybrid_search
 from app.wiki import get_or_generate
-
-app = FastAPI(title="证券法律法规知识库")
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
 DATA_DIR = ROOT / "data"
 
 
-def db() -> sqlite3.Connection:
-    """每个请求用独立连接（SQLite 轻量，开销可忽略）。"""
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """启动时建表一次（幂等），避免每个请求都跑全套 DDL。"""
     DATA_DIR.mkdir(exist_ok=True)
     conn = get_db(DATA_DIR / "knowledge.db")
     init_db(conn)
-    return conn
+    conn.close()
+    yield
+
+
+app = FastAPI(title="证券法律法规知识库", lifespan=lifespan)
+
+
+def db() -> sqlite3.Connection:
+    """每个请求用独立连接（SQLite 轻量，开销可忽略）。"""
+    return get_db(DATA_DIR / "knowledge.db")
 
 
 def try_llm() -> LLMClient | None:
@@ -89,11 +99,14 @@ def list_laws(
         where.append("status = ?")
         params.append(status)
     if q:
-        where.append("(title LIKE ? OR full_text LIKE ?)")
-        params.extend([f"%{q}%"] * 2)
+        # LIKE 通配符转义：用户输入 %/_ 时按字面匹配，否则 q="%" 会匹配所有行
+        eq = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        where.append(r"(title LIKE ? ESCAPE '\' OR full_text LIKE ? ESCAPE '\')")
+        params.extend([f"%{eq}%"] * 2)
     if topic:
-        where.append("topic_tags LIKE ?")
-        params.append(f"%{topic}%")
+        where.append(r"topic_tags LIKE ? ESCAPE '\'")
+        eq_t = topic.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params.append(f"%{eq_t}%")
     cond = ("WHERE " + " AND ".join(where)) if where else ""
     total = conn.execute(
         f"SELECT count(*) AS c FROM laws {cond}", params
@@ -262,6 +275,13 @@ def test_settings(body: SettingsBody | None = None):
         return {"ok": False, "error": str(e)[:300]}
 
 
+# ---- 知识图谱 ----
+@app.get("/api/graph")
+def graph():
+    """法规级全景图谱（径向分层 Canvas 渲染的数据源）。"""
+    return build_graph(db())
+
+
 # ---- wiki 解读 ----
 @app.post("/api/laws/{law_id}/wiki")
 def law_wiki(law_id: int, force: bool = False):
@@ -270,7 +290,10 @@ def law_wiki(law_id: int, force: bool = False):
         llm = LLMClient(load_config(DATA_DIR))
     except LLMError as e:
         raise HTTPException(400, f"大模型未配置：{e}")
-    result = get_or_generate(conn, llm, law_id, force=force)
+    try:
+        result = get_or_generate(conn, llm, law_id, force=force)
+    except LLMError as e:
+        raise HTTPException(502, f"大模型调用失败：{e}")
     if result.get("error"):
         raise HTTPException(404 if "不存在" in result["error"] else 502,
                             result["error"])

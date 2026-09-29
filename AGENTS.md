@@ -30,3 +30,20 @@
 - **合规**：仅采集公开发布的法律法规文本，来源清单在 `crawler/sources.yaml`，修改来源先确认其官方性质
 - **数据**：`data/` 与 `config.json` 不入库（.gitignore）
 - **引用**：LLM 回答必须带法规名+条号溯源，不得无依据输出
+
+## 可靠性机制（2026-09-23 引入，改动前先理解原因）
+
+- **LLM 调用硬超时**（`app/llm.py`）：网关"连接活着但不回响应"时 httpx 库级超时会失效（曾致图谱进程挂死 22 小时），所以 chat/embed 都走线程池 + `fut.result(hard_timeout)` 兜底。**不要移除这层保护**
+- **关系抽取标记表**（`relation_extractions`）：pending 判定看标记而非"是否有关系产出"——天然无关系的法规抽取一次即完成，防止无限重试烧 LLM。`crawler/sync.py` 更新法规内容时会连带清掉该法规的 relations/标记/wiki（FK 无 CASCADE，必须显式删）
+- **图谱 runner**（`run_relations_forever.py`）：msvcrt 实例文件锁（进程死亡自动释放）+ 看门狗（45 分钟无产出自杀）。**同机只能跑一个实例**
+- **前端 XSS 防线**：`web/app.js` 的 `renderInline/renderMarkdown` 内部自带 `esc()`——新增渲染路径**不要**先手动 esc 再传入（会双重转义）；外链一律过 `safeUrl()`
+- **前端语法兼容底线 ES2017**（2026-09-28 搜索失效事故教训）：用户在金融内网用旧版浏览器（Chromium <80），`??`/`?.`（ES2020）、`trimEnd`（ES2019）这类语法会**挂掉整个 app.js 文件**（语法错误是文件级的，一处不支持全部交互失效）。写前端代码只用 ES2017 及以下语法；CSS 的新函数（`min()` 等）必须先写旧值回退再写新值
+
+## Windows 环境坑
+
+- **本项目路径含中文**：`cmd //c`、`start` 等 shell 桥接找不到中文路径下的文件（bash UTF-8 → cmd GBK 转换失败，历史上多次踩坑）。**启动独立后台进程用 Python**：`subprocess.Popen(..., creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB)`，不要用 cmd start
+- **必须带 `CREATE_BREAKAWAY_FROM_JOB`**（2026-09-28 事故教训）：只用 DETACHED_PROCESS 不够——子进程仍在 agent 会话的 Job Object 里，**关闭受管浏览器（BrowserClose）或会话清理时会级联杀死服务**（表现为"服务莫名消失"、页面 fetch 全失败）。BREAKAWAY 让进程脱离作业对象，已实测 BrowserClose 后服务存活
+- **bat 文件编码规范（2026-09-28 定案，start.bat 双击失败事故的教训）**：一律 **GBK 编码 + CRLF 行尾**，且**不用 `chcp 65001`**。理由：① cmd 期望 CRLF，LF-only 批处理解析不可靠；② `chcp 65001` 切换点后 cmd 按新代码页重读文件缓冲，中文行字节边界错位会产生乱码命令；GBK 是中文 Windows 原生代码页，零转换零切换。`.gitattributes` 已设 `*.bat -text`（git 不做行尾归一，GBK 字节原样入库）。**修改 bat 时用 Python 脚本生成**（参考 git 历史），不要用会写 UTF-8+LF 的工具直接编辑
+- **WorkMate Bash 工具会替换 `NUL`→`/dev/null`**：bat 内容里有 `>NUL` 时不能内联在 bash 命令里（会被转换成 Unix 语法），必须经脚本文件生成
+- bat 文件里 REM 注释只用 ASCII；echo 中文没问题（GBK 下正常显示）
+- `.venv\Scripts\python.exe` 在进程表里呈现父子两个 PID（launcher stub + 真实进程），判断"几个实例"时勿误判

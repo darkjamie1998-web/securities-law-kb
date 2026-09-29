@@ -79,6 +79,30 @@ def upsert_law(db: sqlite3.Connection, source: dict, doc: dict) -> str:
             db.rollback()
             return "skip"
 
+    # 内容变更时清理派生数据：relations 的 FK（无 ON DELETE）会阻断
+    # DELETE articles，必须先删关系；抽取标记与 wiki 缓存基于旧内容，一并失效
+    # 入向边的引用方：它们的标记也要连带失效——否则引用方（标记仍是 ok）
+    # 不会重抽，指向本法规的边永久丢失。必须在删除关系前查出引用方。
+    referencing = db.execute(
+        """SELECT DISTINCT fa.law_id FROM relations r
+           JOIN articles fa ON fa.id = r.from_id
+           JOIN articles ta ON ta.id = r.to_id
+           WHERE ta.law_id = ?""",
+        (law_id,),
+    ).fetchall()
+    db.execute(
+        """DELETE FROM relations WHERE from_id IN
+             (SELECT id FROM articles WHERE law_id=?)
+           OR to_id IN (SELECT id FROM articles WHERE law_id=?)""",
+        (law_id, law_id),
+    )
+    db.execute("DELETE FROM wiki_pages WHERE law_id=?", (law_id,))
+    db.execute("DELETE FROM relation_extractions WHERE law_id=?", (law_id,))
+    if referencing:
+        db.execute(
+            "DELETE FROM relation_extractions WHERE law_id IN (%s)" %
+            ",".join(str(r["law_id"]) for r in referencing),
+        )
     # 法条重建（FTS 触发器自动同步）
     db.execute("DELETE FROM articles WHERE law_id=?", (law_id,))
     arts = split_articles(full_text)
@@ -182,6 +206,7 @@ def sync_source(
                     skipped += 1
                 db.commit()
             except Exception as e:  # 单条失败不阻断整体
+                db.rollback()  # 回滚悬挂的 UPDATE/DELETE，避免半提交的不一致状态
                 failed += 1
                 errors.append(f"{url}: {e}")
         status = "ok" if not errors else "partial"
