@@ -1,7 +1,7 @@
 # build_portable.py — 构建全离线自包含便携包
 # 用法: python build_portable.py [--skip-zip]
 #
-# 输出: D:\workmate_projects\法律法规知识库查询-便携版\  + 同级 zip
+# 输出: <项目>/dist/法律法规知识库查询\  + 同级 法律法规知识库查询.zip（分发产物统一放 dist/）
 # 结构: 项目源码(git 已提交状态) + runtime\(完整 Python 3.14.5 安装 + venv site-packages 合并) + data/knowledge.db
 import os
 import shutil
@@ -11,7 +11,8 @@ import zipfile
 from pathlib import Path
 
 SRC = Path(r"D:\workmate_projects\法律法规知识库查询").resolve()
-DST = Path(r"D:\workmate_projects\法律法规知识库查询-便携版")
+# 构建产物固定输出到项目 dist/ 下（2026-09-29 定：分发产物统一从 dist/ 取）
+DST = SRC / "dist" / "法律法规知识库查询"
 PY_HOME = Path(r"C:\Program Files\Python314")
 VENV_SITE = SRC / ".venv" / "Lib" / "site-packages"
 
@@ -19,7 +20,7 @@ VENV_SITE = SRC / ".venv" / "Lib" / "site-packages"
 COPY_DIRS = ["app", "crawler", "web", "tests", "docs", "tools", ".git"]
 COPY_FILES = [
     ".gitignore", ".gitattributes", "AGENTS.md", "CLAUDE.md",
-    "config.example.json", "requirements-full.txt",
+    "config.example.json", "requirements-full.txt", "requirements.txt",
     "启动面板.bat", "环境自检.bat", "relations.bat", "run_relations_forever.py",
 ]
 XD = ["__pycache__", ".pytest_cache"]           # robocopy 排除目录
