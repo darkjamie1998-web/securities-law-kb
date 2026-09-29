@@ -53,12 +53,17 @@ def audit(db: sqlite3.Connection) -> dict:
     total_edges = db.execute("SELECT count(*) FROM relations").fetchone()[0]
     marks = db.execute(
         "SELECT status, count(*) FROM relation_extractions GROUP BY status").fetchall()
+    # failed 明细：网络抖动类失败值得重跑，给出 law_id 与原因方便定位
+    failed = db.execute(
+        """SELECT e.law_id, e.note, l.title FROM relation_extractions e
+           JOIN laws l ON l.id = e.law_id WHERE e.status = 'failed'""").fetchall()
     return {
         "total_laws": total_laws, "total_edges": total_edges,
         "marks": dict(marks),
         "redundant": [dict(r) for r in redundant],
         "isolated": [dict(r) for r in isolated],
         "ghost": [dict(r) for r in ghost],
+        "failed": [dict(r) for r in failed],
     }
 
 
@@ -99,6 +104,11 @@ def main():
     print(f"幽灵标记（声称有关系实际为 0 出边）: {len(r['ghost'])}")
     for x in r["ghost"][:5]:
         print(f"  e.g. law {x['law_id']}（标记 saved={x['saved']}）")
+    if r["failed"]:
+        print(f"抽取失败（多为网络抖动，配置好 LLM 后可重跑）: {len(r['failed'])} 部")
+        for x in r["failed"]:
+            print(f"  [law {x['law_id']}] {x['title'][:32]}（{(x['note'] or '')[:40]}）")
+            print(f"    重跑: python -m app.relations --law {x['law_id']}")
 
     if args.fix and r["ghost"]:
         n = fix_ghost_marks(db)
