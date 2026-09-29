@@ -31,6 +31,7 @@
 
 - **`AGENTS.md`** — Agent 第一入口：项目硬约束、可靠性机制、环境探测方法、常用命令（Cursor/Codex/Gemini 原生读取）
 - **`CLAUDE.md`** — Claude Code 入口（内容为 `@AGENTS.md` 自动内联）
+- **`docs/技术亮点.md`** — 架构与工程决策亮点速览（给评审/协作方）
 - **`docs/plans/`** — 完整架构设计与实施计划（开发前先读 `2026-09-19-securities-law-kb-app.md`）
 - **`.git/`** — 完整版本历史，含全部事故教训记录；Agent 可继续提交
 - Agent 执行命令统一用 `runtime\python.exe`（详见 AGENTS.md「运行环境探测」）

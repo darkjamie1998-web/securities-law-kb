@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.config import load_config
 from app.db import get_db, init_db
 from app.digest import law_digest
-from app.llm import LLMClient
+from app.llm import LLMClient, LLMError
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
@@ -196,7 +196,13 @@ def main():
     args = ap.parse_args()
     db = get_db(DATA_DIR / "knowledge.db")
     init_db(db)  # 幂等建表：旧库缺 relation_extractions 表时 pending_laws 会崩
-    llm = LLMClient(load_config(DATA_DIR))
+    try:
+        llm = LLMClient(load_config(DATA_DIR))
+    except LLMError as e:
+        # 未配置 LLM 时给一行明确指引退出，而非裸堆栈（Agent/双击场景友好）
+        print(f"[relations] 无法启动：{e}")
+        print("[relations] 配置方法：复制 config.example.json 为 data/config.json 并填写，或启动服务后在页面右上角齿轮配置")
+        sys.exit(1)
 
     if args.law:
         ids = [args.law]

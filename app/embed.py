@@ -50,7 +50,13 @@ def main():
     ap.add_argument("--batch", type=int, default=64)
     args = ap.parse_args()
     db = get_db(DATA_DIR / "knowledge.db")
-    client = LLMClient(load_config(DATA_DIR))
+    try:
+        client = LLMClient(load_config(DATA_DIR))
+    except LLMError as e:
+        # 未配置 LLM 时给一行明确指引退出，而非裸堆栈（Agent/双击场景友好）
+        print(f"[embed] 无法启动：{e}")
+        print("[embed] 配置方法：复制 config.example.json 为 data/config.json 并填写，或启动服务后在页面右上角齿轮配置")
+        sys.exit(1)
     r = backfill(db, client, args.batch)
     print(f"[embed] 完成: {r}")
 
