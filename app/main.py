@@ -50,7 +50,16 @@ def try_llm() -> LLMClient | None:
 # ---- 基础 ----
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    """健康检查 + 环境概况：运维/接手 Agent 一眼判断 LLM 是否配置、数据规模。"""
+    conn = db()
+    cfg = load_config(DATA_DIR)
+    return {
+        "status": "ok",
+        "llm_configured": bool(cfg["api_base"] and cfg["api_key"] and cfg["chat_model"]),
+        "embedding_configured": bool(cfg["embedding_model"]),
+        "laws": conn.execute("SELECT count(*) FROM laws").fetchone()[0],
+        "relations": conn.execute("SELECT count(*) FROM relations").fetchone()[0],
+    }
 
 
 @app.get("/api/stats")

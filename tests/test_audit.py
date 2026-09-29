@@ -71,3 +71,16 @@ def test_fix_ghost_keeps_healthy_marks(db):
     db.commit()
     assert fix_ghost_marks(db) == 0  # 边还在，标记健康
     assert db.execute("SELECT count(*) FROM relation_extractions").fetchone()[0] == 1
+
+
+def test_audit_lists_failed_extractions(db):
+    """failed 标记应给出明细（law_id/标题/原因），供重跑定位。"""
+    lid = _add_law(db, 9, "法F")
+    db.execute(
+        "INSERT INTO relation_extractions(law_id, status, note) VALUES(?,?,?)",
+        (lid, "failed", "chat 网络错误: ReadTimeout"))
+    db.commit()
+    r = audit(db)
+    assert r["marks"].get("failed") == 1
+    assert [f["law_id"] for f in r["failed"]] == [lid]
+    assert "ReadTimeout" in r["failed"][0]["note"]
