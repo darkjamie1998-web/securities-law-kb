@@ -1,6 +1,7 @@
 .venv/
 runtime/
 data/
+dist/
 __pycache__/
 *.pyc
 config.json

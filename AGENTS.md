@@ -20,7 +20,7 @@
 
 1. **便携版**：存在 `runtime\python.exe`（内嵌完整 Python 3.14.5 + 全部依赖，零安装零网络）→ 所有命令用 `runtime\python.exe`
 2. **开发版**：存在 `.venv\Scripts\python.exe` → 所有命令用 `.venv\Scripts\python.exe`，依赖按 `requirements-full.txt`（完整冻结清单；旧 requirements.txt 不全，勿再用）
-3. 两者都不存在 → 先跑 `环境自检.bat` 看缺什么；便携版不应出现此情况
+3. 两者都不存在 → 运行 `环境自检.bat`：有系统 Python（≥3.9）时会自动创建项目内 `.venv` 并装依赖（`tools/setup_env.py`，仅动项目文件夹，不改系统环境；内网加镜像参数 `--mirror <URL>`）；无 Python 则提示恢复 `runtime\`
 
 下文命令统一写 `$PY`（bash 下定义 `PY=runtime/python.exe` 或 `PY=.venv/Scripts/python.exe`）。
 
@@ -57,4 +57,5 @@ $PY -m app.audit                                   # 图谱完整性审计
 - **bat 文件编码规范（2026-09-28 定案，start.bat 双击失败事故的教训）**：一律 **GBK 编码 + CRLF 行尾**，且**不用 `chcp 65001`**。理由：① cmd 期望 CRLF，LF-only 批处理解析不可靠；② `chcp 65001` 切换点后 cmd 按新代码页重读文件缓冲，中文行字节边界错位会产生乱码命令；GBK 是中文 Windows 原生代码页，零转换零切换。`.gitattributes` 已设 `*.bat -text`（git 不做行尾归一，GBK 字节原样入库）。**修改 bat 时用 Python 脚本生成**（参考 git 历史），不要用会写 UTF-8+LF 的工具直接编辑
 - **WorkMate Bash 工具会替换 `NUL`→`/dev/null`**：bat 内容里有 `>NUL` 时不能内联在 bash 命令里（会被转换成 Unix 语法），必须经脚本文件生成
 - bat 文件里 REM 注释只用 ASCII；echo 中文没问题（GBK 下正常显示）
+- **bat 调 Python 输出中文必须先 `set PYTHONIOENCODING=gbk`**（2026-09-29 环境自检乱码教训）：机器若全局设了 `PYTHONUTF8=1`（或未来 Python 默认 UTF-8），`python -c "print('中文')"` 在 GBK 控制台上输出 UTF-8 字节变乱码；bat 开头统一设 GBK 后，`python -c`、setup_env.py、uvicorn 输出全部正常。Python 脚本内部再用 `sys.stdout.reconfigure(encoding='gbk')` 双保险（参考 `tools/setup_env.py`）
 - `.venv\Scripts\python.exe` 在进程表里呈现父子两个 PID（launcher stub + 真实进程），判断"几个实例"时勿误判

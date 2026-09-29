@@ -1,6 +1,14 @@
-fastapi==0.141.1
+# 宽松依赖清单：供 setup_env.py 自动配置 .venv 时使用（pip 按当前 Python 版本解析兼容版本）
+# 便携版 runtime\（Python 3.14.5）用 requirements-full.txt 的冻结版本，与此文件无关
+fastapi
 uvicorn[standard]
-httpx==0.28.1
+httpx
 beautifulsoup4
 lxml
+pyyaml
 python-multipart
+playwright
+pdfplumber
+python-docx
+olefile
+pytest
