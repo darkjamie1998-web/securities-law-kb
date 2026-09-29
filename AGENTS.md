@@ -14,14 +14,25 @@
 - RAG = API embedding + SQLite FTS5 混合检索（RRF 融合），无本地嵌入模型
 - wiki = LLM 关联图谱（批量）+ 法规解读（按需生成缓存）
 
+## 运行环境探测（先做这一步）
+
+本项目有两种运行形态，同一份代码，解释器不同。**执行任何命令前先探测**：
+
+1. **便携版**：存在 `runtime\python.exe`（内嵌完整 Python 3.14.5 + 全部依赖，零安装零网络）→ 所有命令用 `runtime\python.exe`
+2. **开发版**：存在 `.venv\Scripts\python.exe` → 所有命令用 `.venv\Scripts\python.exe`，依赖按 `requirements-full.txt`（完整冻结清单；旧 requirements.txt 不全，勿再用）
+3. 两者都不存在 → 先跑 `环境自检.bat` 看缺什么；便携版不应出现此情况
+
+下文命令统一写 `$PY`（bash 下定义 `PY=runtime/python.exe` 或 `PY=.venv/Scripts/python.exe`）。
+
 ## 常用命令
 
 ```bash
-.venv/Scripts/python.exe -m pytest tests/ -v                            # 测试
-.venv/Scripts/python.exe -m uvicorn app.main:app --port 8000            # 启动服务
-.venv/Scripts/python.exe -m crawler.sync                                # 每日增量同步
-.venv/Scripts/python.exe -m app.embed                                   # 新法条向量化
-.venv/Scripts/python.exe -m app.relations --pending 10                  # 关系抽取
+$PY -m pytest tests/ -v                            # 测试
+$PY -m uvicorn app.main:app --port 8000            # 启动服务
+$PY -m crawler.sync                                # 每日增量同步
+$PY -m app.embed                                   # 新法条向量化
+$PY -m app.relations --pending 10                  # 关系抽取
+$PY -m app.audit                                   # 图谱完整性审计
 ```
 
 ## 硬约束
