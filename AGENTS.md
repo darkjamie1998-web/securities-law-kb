@@ -35,6 +35,8 @@ $PY -m app.relations --pending 10                  # 关系抽取
 $PY -m app.audit                                   # 图谱完整性审计
 ```
 
+**便携包构建**：`.venv/Scripts/python.exe build_portable.py` — 全离线自包含包（内嵌 Python 运行时 + knowledge.db），**产物固定输出到 `dist/`**（`dist/法律法规知识库查询/` + 同名 zip；脚本自动清理重建，`dist/` 不入 git）。分发一律从 dist/ 取最新产物。
+
 ## 硬约束
 
 - **反爬**：对官方站点一律走 `crawler/fetcher.py` 限频客户端（默认 ≥5s 间隔 + 抖动、串行、退避重试），严禁绕过；增量同步每日最多 1 次
