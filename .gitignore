@@ -6,3 +6,26 @@ __pycache__/
 *.pyc
 config.json
 .pytest_cache/
+
+# secrets & local overrides
+.env
+.env.*
+*.key
+*.pem
+*.local.json
+
+# databases & logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# editor & tool config
+.claude/
+.idea/
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini

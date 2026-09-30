@@ -1,7 +1,0 @@
-{
-  "plansDirectory": ".context",
-  "skipWebFetchPreflight": true,
-  "worktree": {
-    "bgIsolation": "none"
-  }
-}
