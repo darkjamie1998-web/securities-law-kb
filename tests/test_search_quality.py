@@ -78,6 +78,11 @@ def test_short_word_fallback(db):
     assert any("税收" in r["title"] for r in results)
 
 
+def test_two_char_keyword_hits_seg(db):
+    results = hybrid_search(db, None, "减持", top_k=5)
+    assert any("减持" in r["title"] for r in results)
+
+
 def test_empty_and_special_queries_do_not_crash(db):
     assert hybrid_search(db, None, "", 5) == []
     assert isinstance(hybrid_search(db, None, '"()*', 5), list)

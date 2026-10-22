@@ -101,3 +101,14 @@ def test_build_graph_cache_returns_same_object(db):
     second = build_graph_cached(db)
     assert first is second
 
+
+def test_duplicate_law_excluded_from_graph(db):
+    ids, _ = _seed(db)
+    db.execute("UPDATE laws SET duplicate_of=?, quality_flag='duplicate' WHERE id=?",
+               (ids[0], ids[1]))
+    db.commit()
+    g = build_graph(db)
+    node_ids = {n["id"] for n in g["nodes"]}
+    assert ids[1] not in node_ids
+    assert all(e["s"] != ids[1] and e["t"] != ids[1] for e in g["edges"])
+

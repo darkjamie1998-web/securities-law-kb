@@ -65,7 +65,11 @@ def build_graph(db: sqlite3.Connection) -> dict:
             """SELECT DISTINCT fa.law_id AS s, ta.law_id AS t, r.rel_type
                FROM relations r
                JOIN articles fa ON fa.id = r.from_id
-               JOIN articles ta ON ta.id = r.to_id""")
+               JOIN articles ta ON ta.id = r.to_id
+               JOIN laws lf ON lf.id = fa.law_id
+               JOIN laws lt ON lt.id = ta.law_id
+               WHERE lf.duplicate_of IS NULL AND lf.superseded_by IS NULL
+                 AND lt.duplicate_of IS NULL AND lt.superseded_by IS NULL""")
     ]
     return {"nodes": nodes, "edges": edges}
 

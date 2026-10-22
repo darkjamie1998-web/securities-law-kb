@@ -33,9 +33,12 @@ $PY -m crawler.sync                                # 每日增量同步
 $PY -m app.embed                                   # 新法条向量化
 $PY -m app.relations --pending 10                  # 关系抽取
 $PY -m app.audit                                   # 图谱完整性审计
+$PY -m app.seg_index --ensure                      # 补齐中文分词索引
+$PY -m app.seg_index --rebuild                     # 词典变更后全量重建
+$PY tools/data_cleanup.py --report                 # 数据质量报告（自动备份）
 ```
 
-**便携包构建**：`.venv/Scripts/python.exe build_portable.py` — 全离线自包含包（内嵌 Python 运行时 + knowledge.db），**产物固定输出到 `dist/`**（`dist/法律法规知识库查询/` + 同名 zip；脚本自动清理重建，`dist/` 不入 git）。分发一律从 dist/ 取最新产物。
+**便携包构建**：`.venv/Scripts/python.exe build_portable.py` — 全离线自包含包（内嵌 Python 运行时 + knowledge.db），**产物固定输出到 `dist/`**（`dist/法律法规知识库查询/` + 带日期 zip；脚本自动清理重建，`dist/` 不入 git）。默认不复制 `.git`，需要保留历史时加 `--with-git`。数据库用 SQLite backup API 生成一致性快照。分发一律从 dist/ 取最新产物。
 
 ## 硬约束
 
@@ -50,7 +53,15 @@ $PY -m app.audit                                   # 图谱完整性审计
 - **关系抽取标记表**（`relation_extractions`）：pending 判定看标记而非"是否有关系产出"——天然无关系的法规抽取一次即完成，防止无限重试烧 LLM。`crawler/sync.py` 更新法规内容时会连带清掉该法规的 relations/标记/wiki（FK 无 CASCADE，必须显式删）
 - **图谱 runner**（`run_relations_forever.py`）：msvcrt 实例文件锁（进程死亡自动释放）+ 看门狗（45 分钟无产出自杀）。**同机只能跑一个实例**
 - **前端 XSS 防线**：`web/app.js` 的 `renderInline/renderMarkdown` 内部自带 `esc()`——新增渲染路径**不要**先手动 esc 再传入（会双重转义）；外链一律过 `safeUrl()`
-- **前端语法兼容底线 ES2017**（2026-09-28 搜索失效事故教训）：用户在金融内网用旧版浏览器（Chromium <80），`??`/`?.`（ES2020）、`trimEnd`（ES2019）这类语法会**挂掉整个 app.js 文件**（语法错误是文件级的，一处不支持全部交互失效）。写前端代码只用 ES2017 及以下语法；CSS 的新函数（`min()` 等）必须先写旧值回退再写新值
+- **前端语法兼容底线 ES2017**（2026-09-28 搜索失效事故教训）：用户在金融内网用旧版浏览器（Chromium <80），`??`/`?.`（ES2020）、`trimEnd`（ES2019）这类语法会**挂掉整个 app.js 文件**（语法错误是文件级的，一处不支持全部交互失效）。写前端代码只用 ES2017 及以下语法；CSS 的新函数（`min()` 等）必须先写旧值回退再写新值；flex `gap` 在 Chromium <84 失效，关键布局用子元素 margin 替代
+
+## 数据与索引（2026-10-22 引入）
+
+- **schema 迁移**：`app/migrations.py` 用 `PRAGMA user_version` 管理；`init_db` 自动执行，只加列/加表/加索引，不删列。加字段必须写迁移，不能只改 `SCHEMA`
+- **WAL**：文件库默认 `journal_mode=WAL`、`synchronous=NORMAL`、`busy_timeout=30s`，服务与图谱长跑进程可并发读写；备份用 SQLite backup API（`tools/data_cleanup.py`），不要直接复制在线 db 文件
+- **分词索引** `articles_seg`：jieba 分词后的派生 FTS 表，只索引现行、非重复法规；sync 更新法规后自动 `reindex_law`，词典/分词逻辑变更后跑 `--rebuild`
+- **数据治理**：`tools/data_cleanup.py` 每次先备份到 `data/backups/`；重复法规只标记 `duplicate_of`，空法规标记 `quality_flag='empty_text'`，默认列表/搜索/图谱排除
+- **版本快照**：法规内容变化时保留旧版（`status='已修订'`, `superseded_by=当前 id`），旧条文保留；查找当前版本必须带 `superseded_by IS NULL AND duplicate_of IS NULL`
 
 ## Windows 环境坑
 

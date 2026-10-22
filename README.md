@@ -36,19 +36,33 @@ python -m venv .venv
 .venv/Scripts/python.exe -m app.embed                           # 新法条向量化
 relations.bat                                                   # 图谱全量生成（推荐：独立窗口，日志 data/relations_forever.log）
 .venv/Scripts/python.exe -m app.relations --pending 10          # 小批量关系抽取
-.venv/Scripts/python.exe -m pytest tests/ -v                    # 运行测试（59 个）
+.venv/Scripts/python.exe -m app.seg_index --ensure              # 补齐中文分词索引
+.venv/Scripts/python.exe -m app.seg_index --rebuild             # 词典变更后全量重建
+.venv/Scripts/python.exe -m pytest tests/ -v                    # 运行测试
 ```
 
 **定向补充**（`crawler/targeted_import.py`）：按 `crawler/targets.yaml` 的官方刊载页 URL 清单抓取入库（标题锚定解析 + 限频合规），适合补充交易所栏目未覆盖的通用商法经济法。找到新的全文页 URL 后加入清单重跑即可，`--dry-run` 先验证解析效果。
 
 `run_relations_forever.py`（relations.bat 调用它）内置可靠性机制：**实例文件锁**（同机防双实例重复烧 LLM）、**看门狗**（连续 45 分钟无产出自动退出，可配合外部重启）、**完成标记表**（天然无关系的法规抽取一次即完成，不再无限重试；失败的法规最多自动重试 3 次）。中断后重跑自动续。
 
+## 数据治理与备份
+
+```bash
+.venv/Scripts/python.exe tools/data_cleanup.py --report                 # 质量报告（自动备份）
+.venv/Scripts/python.exe tools/data_cleanup.py --dedupe --mark-quality  # 去重/空数据标记
+```
+
+- 每次运行前自动用 SQLite backup API 备份到 `data/backups/knowledge-YYYYmmdd-HHMMSS.db`
+- 重复法规只标记 `duplicate_of`（不物理删除），默认列表/搜索/图谱不展示
+- 法规内容变化时保留旧版快照，旧版状态为「已修订」，原文仍可从详情页查看
+- 分词索引 `articles_seg` 是派生数据，可随时重建；`knowledge.db` 会因此增大约 45MB
+
 ## 功能地图
 
 | 功能 | 入口 |
 |------|------|
 | 法规浏览（效力级别/状态筛选） | 左侧导航树 |
-| 法条搜索（关键词 + 向量混合，RRF 融合；≥3 字走 FTS5 trigram，短词自动 LIKE 兜底） | 顶部搜索框 |
+| 法条搜索（精确条号 + jieba 分词 BM25 + trigram + 向量，RRF 融合；2 字词可命中，单字 LIKE 兜底） | 顶部搜索框 |
 | 法规详情 + 条文 + 双向关联（分组/类型筛选） | 点击法规卡片 |
 | 知识图谱（全景 + 16 个业务板块子图，径向分层 Canvas） | 左侧"探索 → 🕸 知识图谱"，顶部板块 chips 切换 |
 | Wiki 解读（LLM 按需生成，缓存复用） | 详情页"生成/刷新解读" |
@@ -71,7 +85,7 @@ app/       服务层（FastAPI、检索、对话、wiki、配置）
 crawler/   采集层（来源配置、限频爬虫、解析、同步）
 web/       前端单页（原生 HTML/CSS/JS，无外部依赖）
 data/      运行时数据（knowledge.db、config.json、原始留档）— 不入 git
-tests/     50 个单元测试
+tests/     单元测试（检索质量/API/迁移/版本化/数据治理/构建）
 ```
 
 ## 已知限制
