@@ -68,7 +68,12 @@ def reindex_law(db: sqlite3.Connection, law_id: int) -> int:
 def rebuild_all(db: sqlite3.Connection) -> int:
     ensure_schema(db)
     db.execute("DELETE FROM articles_seg")
-    rows = db.execute("SELECT id, text, article_no FROM articles").fetchall()
+    # 只索引现行且非重复法规：旧版快照与重复项不参与检索
+    rows = db.execute(
+        """SELECT a.id, a.text, a.article_no FROM articles a
+           JOIN laws l ON l.id = a.law_id
+           WHERE l.duplicate_of IS NULL AND l.superseded_by IS NULL"""
+    ).fetchall()
     for r in rows:
         db.execute(
             "INSERT INTO articles_seg(rowid, seg, article_no) VALUES(?,?,?)",
@@ -83,7 +88,9 @@ def ensure_fresh(db: sqlite3.Connection) -> int:
     ensure_schema(db)
     missing = db.execute(
         """SELECT a.id, a.text, a.article_no FROM articles a
-           WHERE NOT EXISTS (SELECT 1 FROM articles_seg s WHERE s.rowid = a.id)"""
+           JOIN laws l ON l.id = a.law_id
+           WHERE l.duplicate_of IS NULL AND l.superseded_by IS NULL
+             AND NOT EXISTS (SELECT 1 FROM articles_seg s WHERE s.rowid = a.id)"""
     ).fetchall()
     for r in missing:
         db.execute(
