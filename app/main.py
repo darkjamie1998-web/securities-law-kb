@@ -90,10 +90,15 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
     @app.get("/api/stats")
     def stats(conn: sqlite3.Connection = Depends(get_conn)):
+        active_where = (
+            "duplicate_of IS NULL AND superseded_by IS NULL "
+            "AND (quality_flag IS NULL OR quality_flag NOT IN ('duplicate','empty_text'))"
+        )
         by_level = {
             r["level"]: r["c"]
             for r in conn.execute(
-                "SELECT level, count(*) AS c FROM laws GROUP BY level ORDER BY c DESC"
+                f"SELECT level, count(*) AS c FROM laws WHERE {active_where} "
+                "GROUP BY level ORDER BY c DESC"
             )
         }
         last_sync = conn.execute(
@@ -101,7 +106,10 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             "ORDER BY id DESC LIMIT 1"
         ).fetchone()
         return {
-            "laws": conn.execute("SELECT count(*) AS c FROM laws").fetchone()["c"],
+            "laws": conn.execute(
+                f"SELECT count(*) AS c FROM laws WHERE {active_where}"
+            ).fetchone()["c"],
+            "total_laws": conn.execute("SELECT count(*) AS c FROM laws").fetchone()["c"],
             "articles": conn.execute("SELECT count(*) AS c FROM articles").fetchone()["c"],
             "embedded": conn.execute(
                 "SELECT count(*) AS c FROM articles WHERE embedding IS NOT NULL"
