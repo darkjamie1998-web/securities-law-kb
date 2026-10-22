@@ -1,18 +1,17 @@
-# tests/test_health.py — /api/health 增强字段测试（不联网，monkeypatch DATA_DIR）
+# tests/test_health.py — /api/health 增强字段测试（应用工厂 + 临时库）
 import json
 
 import pytest
+from fastapi.testclient import TestClient
 
 from app import main as app_main
 from app.db import get_db, init_db
 
 
 @pytest.fixture()
-def data_dir(tmp_path, monkeypatch):
+def client(tmp_path):
     data = tmp_path / "data"
     data.mkdir()
-    # health() 与 db() 运行时读模块全局 DATA_DIR，patch 掉即可函数级测试
-    monkeypatch.setattr(app_main, "DATA_DIR", data)
     conn = get_db(data / "knowledge.db")
     init_db(conn)
     cur = conn.execute(
@@ -28,31 +27,38 @@ def data_dir(tmp_path, monkeypatch):
         (art_id, art_id, "引用", "n"))
     conn.commit()
     conn.close()
-    return data
+    app = app_main.create_app(data)
+    with TestClient(app) as c:
+        yield c
 
 
-def test_health_unconfigured(data_dir):
-    r = app_main.health()
+def _write_config(client, body):
+    (client.app.state.data_dir / "config.json").write_text(
+        json.dumps(body), encoding="utf-8")
+
+
+def test_health_unconfigured(client):
+    r = client.get("/api/health").json()
     assert r["status"] == "ok"
     assert r["llm_configured"] is False
     assert r["embedding_configured"] is False
     assert r["laws"] == 1 and r["relations"] == 1
 
 
-def test_health_configured(data_dir):
-    (data_dir / "config.json").write_text(json.dumps({
+def test_health_configured(client):
+    _write_config(client, {
         "api_base": "https://gw.example.com/v1", "api_key": "sk-test",
         "chat_model": "m1", "embedding_model": "e1",
-    }), encoding="utf-8")
-    r = app_main.health()
+    })
+    r = client.get("/api/health").json()
     assert r["llm_configured"] is True
     assert r["embedding_configured"] is True
 
 
-def test_health_partial_config_counts_unconfigured(data_dir):
+def test_health_partial_config_counts_unconfigured(client):
     # 只有 api_base，无 key/model → 判定未配置
-    (data_dir / "config.json").write_text(json.dumps({
+    _write_config(client, {
         "api_base": "https://gw.example.com/v1", "api_key": "",
-    }), encoding="utf-8")
-    r = app_main.health()
+    })
+    r = client.get("/api/health").json()
     assert r["llm_configured"] is False
