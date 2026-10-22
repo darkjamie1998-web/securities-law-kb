@@ -5,6 +5,7 @@ uvicorn[standard]
 httpx
 beautifulsoup4
 lxml
+jieba
 pyyaml
 python-multipart
 playwright
