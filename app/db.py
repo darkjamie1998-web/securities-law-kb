@@ -1,6 +1,8 @@
 # app/db.py — SQLite 连接、建表与 FTS5 同步触发器
 import sqlite3
 
+from app.migrations import migrate
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS laws (
     id INTEGER PRIMARY KEY,
@@ -104,16 +106,26 @@ END;
 
 def get_db(path) -> sqlite3.Connection:
     """打开 SQLite 连接：Row 行工厂 + 外键约束开启。path 可为 Path 或 ':memory:'。
-    timeout=30：多进程并发写（服务 + 图谱生成脚本）时的 busy 等待上限。"""
+    timeout=30：多进程并发写（服务 + 图谱生成脚本）时的 busy 等待上限。
+
+    WAL：服务读与图谱 runner 写并发时避免 delete 模式的读写互斥；
+    busy_timeout 与 timeout 一致，保证短时锁等待而非立即报错。
+    """
     conn = sqlite3.connect(str(path), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA cache_size = -64000")
+    if str(path) != ":memory:":
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
     return conn
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    """建表（幂等）。"""
+    """建表（幂等）并执行 schema 迁移。"""
     conn.executescript(SCHEMA)
     conn.executescript(FTS_SCHEMA)
     conn.executescript(TRIGGERS)
     conn.commit()
+    migrate(conn)
