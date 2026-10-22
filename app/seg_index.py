@@ -46,6 +46,7 @@ def seg_count(db: sqlite3.Connection) -> int:
 
 def reindex_law(db: sqlite3.Connection, law_id: int) -> int:
     """重建一部法规的全部分词索引（sync 更新后调用）。"""
+    ensure_schema(db)
     ids = [r[0] for r in db.execute(
         "SELECT id FROM articles WHERE law_id=?", (law_id,))]
     if not ids:

@@ -4,6 +4,7 @@
 #   python -m crawler.sync --source 证监会           # 单来源
 #   python -m crawler.sync --source 深圳证券交易所 --limit 20   # 小规模试跑
 import argparse
+import re
 import sqlite3
 import sys
 from datetime import datetime
@@ -15,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import load_config
 from app.db import get_db, init_db
+from app.seg_index import reindex_law
 from crawler.fetcher import default_fetcher
 from crawler.parsers import (
     content_hash,
@@ -33,8 +35,47 @@ def load_sources() -> list[dict]:
         return [s for s in yaml.safe_load(f)["sources"] if s.get("enabled")]
 
 
+def _version_label(title: str) -> str | None:
+    """从标题提取版本标签，如「2025年修正」。"""
+    m = re.search(r"[（(](\d{4}年(?:修订|修正))[）)]", title or "")
+    return m.group(1) if m else None
+
+
+def _snapshot_version(db: sqlite3.Connection, law) -> int | None:
+    """把当前法规复制为旧版快照；返回快照 law_id，content_hash 冲突时返回 None。"""
+    conflict = db.execute(
+        "SELECT id FROM laws WHERE content_hash=? AND id!=?",
+        (law["content_hash"], law["id"])).fetchone()
+    if conflict:
+        return None
+    # 注意：当前行此时已更新为新内容，快照必须用 law（旧值 Row）显式写入，
+    # 不能 INSERT ... SELECT 当前行，否则会把新 hash/新全文复制成“旧版”。
+    cur = db.execute(
+        """INSERT INTO laws(title, doc_number, issuer, level, topic_tags,
+             issue_date, published_at, effective_date, status, source_name,
+             source_url, content_hash, full_text, created_at, updated_at,
+             quality_flag, duplicate_of, superseded_by, version_label)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (law["title"], law["doc_number"], law["issuer"], law["level"],
+         law["topic_tags"], law["issue_date"], law["published_at"],
+         law["effective_date"], "已修订", law["source_name"],
+         law["source_url"], law["content_hash"], law["full_text"],
+         law["created_at"], law["updated_at"], None, None, law["id"],
+         law["version_label"]))
+    snap_id = cur.lastrowid
+    db.execute(
+        """INSERT INTO articles(law_id, article_no, text)
+           SELECT ?, article_no, text FROM articles WHERE law_id=?""",
+        (snap_id, law["id"]))
+    return snap_id
+
+
 def upsert_law(db: sqlite3.Connection, source: dict, doc: dict) -> str:
-    """入库/更新一部法规及其法条。返回 'new' / 'updated' / 'skip'。"""
+    """入库/更新一部法规及其法条。返回 'new' / 'updated' / 'skip'。
+
+    内容变化时先保留旧版快照（status='已修订', superseded_by=当前 id），
+    再原地更新当前版本；旧版条文与全文可继续查看。
+    """
     title = doc.get("title", "").strip()
     full_text = doc.get("full_text", "").strip()
     if not title or len(full_text) < 50:
@@ -43,33 +84,41 @@ def upsert_law(db: sqlite3.Connection, source: dict, doc: dict) -> str:
     now = datetime.now().isoformat(timespec="seconds")
 
     row = db.execute(
-        "SELECT id, content_hash FROM laws WHERE source_name=? AND title=?",
+        """SELECT * FROM laws
+           WHERE source_name=? AND title=? AND superseded_by IS NULL
+             AND duplicate_of IS NULL""",
         (source["name"], title),
     ).fetchone()
     if row and row["content_hash"] == chash:
         return "skip"
     if row:
         law_id = row["id"]
+        # 先更新当前行，释放旧 content_hash（UNIQUE），再插入旧版快照。
+        # row 是旧值的快照，更新后仍可用于复制旧版全文/条文。
         db.execute(
             """UPDATE laws SET doc_number=?, issuer=?, issue_date=?, effective_date=?,
-               content_hash=?, full_text=?, updated_at=? WHERE id=?""",
+               content_hash=?, full_text=?, updated_at=?, version_label=? WHERE id=?""",
             (
                 doc.get("doc_number"), doc.get("issuer"), doc.get("issue_date"),
-                doc.get("effective_date"), chash, full_text, now, law_id,
+                doc.get("effective_date"), chash, full_text, now,
+                _version_label(title), law_id,
             ),
         )
+        if row["content_hash"] != chash:
+            _snapshot_version(db, row)
         action = "updated"
     else:
         try:
             cur = db.execute(
                 """INSERT INTO laws(title, doc_number, issuer, level, issue_date,
                    effective_date, source_name, source_url, content_hash, full_text,
-                   created_at, updated_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   created_at, updated_at, version_label)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     title, doc.get("doc_number"), doc.get("issuer"), source.get("level", ""),
                     doc.get("issue_date"), doc.get("effective_date"), source["name"],
                     doc.get("source_url"), chash, full_text, now, now,
+                    _version_label(title),
                 ),
             )
             law_id = cur.lastrowid
@@ -114,6 +163,8 @@ def upsert_law(db: sqlite3.Connection, source: dict, doc: dict) -> str:
             "INSERT INTO articles(law_id, article_no, text) VALUES(?,?,?)",
             (law_id, no, text),
         )
+    # 分词索引是派生数据：条文重建后同步刷新该法规的分词行
+    reindex_law(db, law_id)
     return action
 
 

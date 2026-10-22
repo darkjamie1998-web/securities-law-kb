@@ -63,10 +63,15 @@ def test_update_rebuilds_fts(db):
     """更新后 FTS 索引与新法条一致（旧关键词不再命中）。"""
     _seed_two_laws_with_relation(db)
     upsert_law(db, SOURCE, _doc("第二条 全新关键词甲乙丙。" * 10))
+    # 只统计现行版本的条文：旧版快照会保留在 articles 中，但不应参与检索
+    current_ids = ("SELECT a.id FROM articles a JOIN laws l ON l.id=a.law_id "
+                   "WHERE l.superseded_by IS NULL")
     hit_old = db.execute(
-        "SELECT count(*) FROM articles_fts WHERE articles_fts MATCH '原文内容'").fetchone()[0]
+        f"SELECT count(*) FROM articles_fts WHERE articles_fts MATCH '原文内容' "
+        f"AND rowid IN ({current_ids})").fetchone()[0]
     hit_new = db.execute(
-        "SELECT count(*) FROM articles_fts WHERE articles_fts MATCH '关键词甲乙丙'").fetchone()[0]
+        f"SELECT count(*) FROM articles_fts WHERE articles_fts MATCH '关键词甲乙丙' "
+        f"AND rowid IN ({current_ids})").fetchone()[0]
     assert hit_old == 0 and hit_new > 0
 
 

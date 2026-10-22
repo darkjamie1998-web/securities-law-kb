@@ -249,6 +249,7 @@ def hybrid_search(db, llm, query: str, top_k: int = 10) -> list[dict]:
             FROM articles a JOIN laws l ON a.law_id = l.id
             WHERE a.id IN ({",".join("?" * len(fused))})
               AND l.duplicate_of IS NULL
+              AND l.superseded_by IS NULL
               AND (l.quality_flag IS NULL OR l.quality_flag != 'duplicate')""",
         [aid for aid, _ in fused],
     ).fetchall() if fused else []
