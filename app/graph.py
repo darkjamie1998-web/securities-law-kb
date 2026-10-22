@@ -57,7 +57,8 @@ def build_graph(db: sqlite3.Connection) -> dict:
                  (SELECT count(*) FROM relations r JOIN articles a ON a.id = r.to_id
                   WHERE a.law_id = l.id) AS in_deg
                FROM laws l
-               WHERE l.duplicate_of IS NULL AND l.superseded_by IS NULL""")
+               WHERE l.duplicate_of IS NULL AND l.superseded_by IS NULL
+                 AND (l.quality_flag IS NULL OR l.quality_flag != 'empty_text')""")
     ]
     edges = [
         {"s": r["s"], "t": r["t"], "rel_type": r["rel_type"]}

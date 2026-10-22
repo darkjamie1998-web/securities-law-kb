@@ -72,7 +72,8 @@ def rebuild_all(db: sqlite3.Connection) -> int:
     rows = db.execute(
         """SELECT a.id, a.text, a.article_no FROM articles a
            JOIN laws l ON l.id = a.law_id
-           WHERE l.duplicate_of IS NULL AND l.superseded_by IS NULL"""
+           WHERE l.duplicate_of IS NULL AND l.superseded_by IS NULL
+             AND (l.quality_flag IS NULL OR l.quality_flag != 'empty_text')"""
     ).fetchall()
     for r in rows:
         db.execute(
@@ -90,6 +91,7 @@ def ensure_fresh(db: sqlite3.Connection) -> int:
         """SELECT a.id, a.text, a.article_no FROM articles a
            JOIN laws l ON l.id = a.law_id
            WHERE l.duplicate_of IS NULL AND l.superseded_by IS NULL
+             AND (l.quality_flag IS NULL OR l.quality_flag != 'empty_text')
              AND NOT EXISTS (SELECT 1 FROM articles_seg s WHERE s.rowid = a.id)"""
     ).fetchall()
     for r in missing:
