@@ -299,10 +299,10 @@ def main():
     browser = None
     if any(s.get("render") for s in sources):
         from crawler.browser_fetcher import BrowserFetcher
-        from crawler.fetcher import RateLimiter
         browser = BrowserFetcher(
-            rate_limiter=RateLimiter(default_interval=float(cfg.get("request_interval_sec", 5))),
+            rate_limiter=fetcher.limiter,
             daily_max=int(cfg.get("daily_max_per_source", 500)),
+            robots_checker=fetcher.check_robots,
         )
 
     try:

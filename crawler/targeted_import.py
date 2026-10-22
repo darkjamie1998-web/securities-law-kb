@@ -127,7 +127,11 @@ def main():
                 return resp.text
         if browser is None:
             from crawler.browser_fetcher import BrowserFetcher
-            browser = BrowserFetcher()
+            browser = BrowserFetcher(
+                rate_limiter=fetcher.limiter,
+                daily_max=int(cfg.get("daily_max_per_source", 500)),
+                robots_checker=fetcher.check_robots,
+            )
         return browser.render(url, source_name, timeout=25000)
 
     ok = fail = skip = 0

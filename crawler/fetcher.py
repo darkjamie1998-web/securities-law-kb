@@ -110,6 +110,10 @@ class Fetcher:
         return self._consecutive_failures.get(source, 0) >= 3
 
     # ---- 对外 ----
+    def check_robots(self, url: str) -> bool:
+        """公共 robots 检查（供 BrowserFetcher 复用，保证两条抓取路径同一合规标准）。"""
+        return self._check_robots(url)
+
     def get(self, url: str, source: str, interval: float | None = None) -> httpx.Response:
         self._check_budget(source)
         if not self._check_robots(url):
