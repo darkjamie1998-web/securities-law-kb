@@ -144,6 +144,20 @@ function statusBadge(status) {
   return `<span class="badge ${cls}">${esc(status || "未知")}</span>`;
 }
 
+// 数据质量提示：unsplit=无条号按全文展示；empty_text=正文异常；duplicate=重复条目
+function qualityBadge(law) {
+  if (law.quality_flag === "unsplit") {
+    return '<span class="badge warn" title="该法规无「第X条」结构，按全文展示">全文展示</span>';
+  }
+  if (law.quality_flag === "empty_text") {
+    return '<span class="badge dead" title="正文过短，数据可能解析异常">数据异常</span>';
+  }
+  if (law.quality_flag === "duplicate") {
+    return '<span class="badge warn" title="与其他法规重复，默认列表中隐藏">重复条目</span>';
+  }
+  return "";
+}
+
 function btn(text, enabled, onclick) {
   const b = document.createElement("button");
   b.textContent = text;
@@ -172,6 +186,7 @@ async function loadLawDetail(id, highlightNo = null) {
     <div class="meta">
       <span class="badge level">${esc(law.level || "")}</span>
       ${statusBadge(law.status)}
+      ${qualityBadge(law)}
       ${law.doc_number ? `<span>${esc(law.doc_number)}</span>` : ""}
       ${law.issuer ? `<span>${esc(law.issuer)}</span>` : ""}
       ${law.effective_date ? `<span>施行 ${esc(law.effective_date)}</span>` : ""}

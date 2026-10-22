@@ -60,7 +60,9 @@ $PY tools/data_cleanup.py --report                 # 数据质量报告（自动
 - **schema 迁移**：`app/migrations.py` 用 `PRAGMA user_version` 管理；`init_db` 自动执行，只加列/加表/加索引，不删列。加字段必须写迁移，不能只改 `SCHEMA`
 - **WAL**：文件库默认 `journal_mode=WAL`、`synchronous=NORMAL`、`busy_timeout=30s`，服务与图谱长跑进程可并发读写；备份用 SQLite backup API（`tools/data_cleanup.py`），不要直接复制在线 db 文件
 - **分词索引** `articles_seg`：jieba 分词后的派生 FTS 表，只索引现行、非重复法规；sync 更新法规后自动 `reindex_law`，词典/分词逻辑变更后跑 `--rebuild`
-- **数据治理**：`tools/data_cleanup.py` 每次先备份到 `data/backups/`；重复法规只标记 `duplicate_of`，空法规标记 `quality_flag='empty_text'`，默认列表/搜索/图谱排除
+- **数据治理**：`tools/data_cleanup.py` 每次先备份到 `data/backups/`；重复法规只标记 `duplicate_of`，空法规标记 `quality_flag='empty_text'`，无条号整篇法规标记 `unsplit`，默认列表/搜索/图谱排除重复与空数据
+- **状态维护**：来源暂不提供时效状态时用 `tools/set_status.py --id/--title --status` 人工维护（自动备份）；`crawler.sync` 若解析到 `doc["status"]` 会写入
+- **备份保留**：`tools/data_cleanup.py --backup-only --prune-backups N` 只保留最近 N 份，避免备份无限增长
 - **版本快照**：法规内容变化时保留旧版（`status='已修订'`, `superseded_by=当前 id`），旧条文保留；查找当前版本必须带 `superseded_by IS NULL AND duplicate_of IS NULL`
 
 ## Windows 环境坑

@@ -49,13 +49,18 @@ relations.bat                                                   # 图谱全量�
 
 ```bash
 .venv/Scripts/python.exe tools/data_cleanup.py --report                 # 质量报告（自动备份）
-.venv/Scripts/python.exe tools/data_cleanup.py --dedupe --mark-quality  # 去重/空数据标记
+.venv/Scripts/python.exe tools/data_cleanup.py --dedupe --mark-quality  # 去重/空数据/无条号标记
+.venv/Scripts/python.exe tools/data_cleanup.py --backup-only --prune-backups 2  # 只保留最近 2 份备份
+.venv/Scripts/python.exe tools/set_status.py --list                     # 查看时效状态分布
+.venv/Scripts/python.exe tools/set_status.py --title 证券法 --status 已废止  # 人工维护状态
 ```
 
 - 每次运行前自动用 SQLite backup API 备份到 `data/backups/knowledge-YYYYmmdd-HHMMSS.db`
 - 重复法规只标记 `duplicate_of`（不物理删除），默认列表/搜索/图谱不展示
+- 无「第X条」结构的法规（行业标准、公告、会议纪要等）标记为 `unsplit`，保留全文，详情页显示「全文展示」，不强行切分
 - 法规内容变化时保留旧版快照，旧版状态为「已修订」，原文仍可从详情页查看
-- 分词索引 `articles_seg` 是派生数据，可随时重建；`knowledge.db` 会因此增大约 45MB
+- 来源暂不提供时效状态，可用 `tools/set_status.py` 人工标记「现行有效/已修订/已废止」（自动备份）
+- 分词索引 `articles_seg` 是派生数据，可随时重建；`knowledge.db` 会因此增大约 50MB
 
 ## 功能地图
 

@@ -97,11 +97,12 @@ def upsert_law(db: sqlite3.Connection, source: dict, doc: dict) -> str:
         # row 是旧值的快照，更新后仍可用于复制旧版全文/条文。
         db.execute(
             """UPDATE laws SET doc_number=?, issuer=?, issue_date=?, effective_date=?,
-               content_hash=?, full_text=?, updated_at=?, version_label=? WHERE id=?""",
+               content_hash=?, full_text=?, updated_at=?, version_label=?,
+               status=COALESCE(?, status) WHERE id=?""",
             (
                 doc.get("doc_number"), doc.get("issuer"), doc.get("issue_date"),
                 doc.get("effective_date"), chash, full_text, now,
-                _version_label(title), law_id,
+                _version_label(title), doc.get("status"), law_id,
             ),
         )
         if row["content_hash"] != chash:
@@ -112,13 +113,13 @@ def upsert_law(db: sqlite3.Connection, source: dict, doc: dict) -> str:
             cur = db.execute(
                 """INSERT INTO laws(title, doc_number, issuer, level, issue_date,
                    effective_date, source_name, source_url, content_hash, full_text,
-                   created_at, updated_at, version_label)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   created_at, updated_at, version_label, status)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     title, doc.get("doc_number"), doc.get("issuer"), source.get("level", ""),
                     doc.get("issue_date"), doc.get("effective_date"), source["name"],
                     doc.get("source_url"), chash, full_text, now, now,
-                    _version_label(title),
+                    _version_label(title), doc.get("status") or "现行有效",
                 ),
             )
             law_id = cur.lastrowid

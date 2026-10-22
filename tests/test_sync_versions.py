@@ -41,6 +41,17 @@ def test_same_content_is_skip(tmp_path):
     db.close()
 
 
+def test_upsert_uses_source_status(tmp_path):
+    db = get_db(tmp_path / "t.db")
+    init_db(db)
+    ensure_schema(db)
+    doc = _doc("第一条 状态测试。" * 30)
+    doc["status"] = "已废止"
+    assert upsert_law(db, _source(), doc) == "new"
+    assert db.execute("SELECT status FROM laws").fetchone()[0] == "已废止"
+    db.close()
+
+
 def test_update_marks_referencing_laws_pending(tmp_path):
     db = get_db(tmp_path / "t.db")
     init_db(db)

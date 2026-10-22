@@ -83,13 +83,31 @@ def dedupe(db, dry_run: bool = False) -> int:
 
 
 def mark_quality(db, dry_run: bool = False) -> int:
-    """标记过短法规为 empty_text，并删除正文为空的条文。"""
+    """标记过短法规 empty_text、无条号整篇法规 unsplit，并删除空条文。"""
     changed = 0
     for r in db.execute("SELECT id, full_text FROM laws").fetchall():
         if len((r["full_text"] or "").strip()) < 200:
             if not dry_run:
                 db.execute("UPDATE laws SET quality_flag='empty_text' WHERE id=?", (r["id"],))
             changed += 1
+
+    # 全篇没有「第X条」结构的法规（行业标准、公告、会议纪要等）：保留全文，
+    # 标记为 unsplit，前端提示“全文展示”，不强行切分。
+    unsplit_ids = [r[0] for r in db.execute(
+        """SELECT l.id FROM laws l
+           WHERE l.quality_flag IS NULL
+             AND l.duplicate_of IS NULL AND l.superseded_by IS NULL
+             AND length(trim(l.full_text)) >= 200
+             AND NOT EXISTS (
+               SELECT 1 FROM articles a WHERE a.law_id = l.id
+                 AND a.article_no IS NOT NULL AND a.article_no != '')"""
+    )]
+    if unsplit_ids and not dry_run:
+        q = ",".join("?" * len(unsplit_ids))
+        db.execute(f"UPDATE laws SET quality_flag='unsplit' WHERE id IN ({q})",
+                   unsplit_ids)
+    changed += len(unsplit_ids)
+
     empty_ids = [r[0] for r in db.execute(
         "SELECT id FROM articles WHERE length(trim(text)) < 5")]
     if empty_ids and not dry_run:
@@ -103,6 +121,19 @@ def mark_quality(db, dry_run: bool = False) -> int:
     if not dry_run:
         db.commit()
     return changed + len(empty_ids)
+
+
+def prune_backups(keep: int = 3, dest_dir: Path = BACKUP_DIR) -> list[Path]:
+    """只保留最近 keep 份备份，返回删除列表。"""
+    if keep < 1:
+        raise ValueError("keep 必须 >= 1")
+    files = sorted(dest_dir.glob("knowledge-*.db"),
+                   key=lambda p: p.stat().st_mtime, reverse=True)
+    removed = []
+    for p in files[keep:]:
+        p.unlink()
+        removed.append(p)
+    return removed
 
 
 def report(db) -> dict:
@@ -126,10 +157,16 @@ def main():
     ap.add_argument("--mark-quality", action="store_true")
     ap.add_argument("--report", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--prune-backups", type=int, metavar="N",
+                    help="只保留最近 N 份备份（配合备份清理）")
     args = ap.parse_args()
 
     backup = backup_db()
     print(f"[backup] {backup}")
+    if args.prune_backups and not args.dry_run:
+        removed = prune_backups(args.prune_backups)
+        for p in removed:
+            print(f"[prune] {p}")
     if args.backup_only:
         return
 
