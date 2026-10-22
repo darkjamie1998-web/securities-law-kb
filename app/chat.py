@@ -62,7 +62,12 @@ def agent_chat(db, llm, messages: list[dict], max_rounds: int = MAX_ROUNDS) -> d
     返回 {"content": 最终回答, "citations": 引用列表,
           "searches": [每次检索词], "rounds": 实际轮数}
     """
-    convo = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+    # 输入防御：只保留 dict 消息、最近 40 条、单条 8k 字，避免超长上下文烧 token
+    clean = [dict(m) for m in messages if isinstance(m, dict)][-40:]
+    for m in clean:
+        if isinstance(m.get("content"), str) and len(m["content"]) > 8000:
+            m["content"] = m["content"][:8000]
+    convo = [{"role": "system", "content": SYSTEM_PROMPT}] + clean
     searches: list[str] = []
     citations: list[dict] = []
     rounds = 0
@@ -78,14 +83,17 @@ def agent_chat(db, llm, messages: list[dict], max_rounds: int = MAX_ROUNDS) -> d
             return {"content": content, "citations": citations,
                     "searches": searches, "rounds": rounds}
 
-        # 有工具调用：执行并回填
+        # 有工具调用：执行并回填（对网关/模型返回结构做防御）
         convo.append(msg)
-        for tc in tool_calls:
-            fn = tc["function"]
-            if fn["name"] == "search_laws":
+        for idx, tc in enumerate(tool_calls):
+            fn = tc.get("function") if isinstance(tc, dict) else None
+            if not isinstance(fn, dict):
+                continue
+            name = fn.get("name") or ""
+            if name == "search_laws":
                 try:
-                    args = json.loads(fn["arguments"] or "{}")
-                except json.JSONDecodeError:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except (json.JSONDecodeError, TypeError):
                     args = {}
                 if not isinstance(args, dict):  # LLM 偶发返回数组/字符串
                     args = {}
@@ -93,10 +101,10 @@ def agent_chat(db, llm, messages: list[dict], max_rounds: int = MAX_ROUNDS) -> d
                 searches.append(q)  # 与 _run_tool 用同一规范化值
                 output = _run_tool(db, llm, args)
             else:
-                output = f"未知工具：{fn['name']}"
+                output = f"未知工具：{name}"
             convo.append({
                 "role": "tool",
-                "tool_call_id": tc["id"],
+                "tool_call_id": tc.get("id") or f"call_{rounds}_{idx}",
                 "content": output,
             })
 

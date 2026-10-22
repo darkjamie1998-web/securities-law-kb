@@ -55,12 +55,15 @@ def extract_relations(llm: LLMClient, title: str, issuer: str, digest: str) -> l
     msg = llm.chat([{"role": "user", "content": PROMPT.format(
         title=title, issuer=issuer or "未知", digest=digest)}])
     content = msg.get("content") or ""
-    m = re.search(r"\{.*\}", content, re.S)
-    if not m:
+    # 取首个 { 到最后一个 }：比贪婪正则更稳，能容忍前后解释文字与嵌套对象
+    start, end = content.find("{"), content.rfind("}")
+    if start < 0 or end <= start:
         return []
     try:
-        data = json.loads(m.group(0))
+        data = json.loads(content[start:end + 1])
     except json.JSONDecodeError:
+        return []
+    if not isinstance(data, dict):
         return []
     out = []
     for r in data.get("relations", []):

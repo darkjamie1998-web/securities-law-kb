@@ -93,3 +93,11 @@ def test_build_graph_nodes_have_board(db):
     # 法A/法B/法C 均无板块关键词 → 归"其他"
     assert {n["board"] for n in g["nodes"]} == {"其他"}
 
+
+def test_build_graph_cache_returns_same_object(db):
+    from app.graph import build_graph_cached
+    _seed(db)
+    first = build_graph_cached(db)
+    second = build_graph_cached(db)
+    assert first is second
+

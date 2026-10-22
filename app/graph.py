@@ -44,6 +44,7 @@ def build_graph(db: sqlite3.Connection) -> dict:
 
     relations 表是法条级的（from_id/to_id 指向 article），图谱按法规聚合：
     同一对法规间可能存在多条法条级边，聚合后保留 (s, t, rel_type) 去重。
+    重复法规与旧版快照默认不进入图谱。
     """
     nodes = [
         {"id": r["id"], "title": r["title"], "level": r["level"] or "未分类",
@@ -55,7 +56,8 @@ def build_graph(db: sqlite3.Connection) -> dict:
                   WHERE a.law_id = l.id) AS out_deg,
                  (SELECT count(*) FROM relations r JOIN articles a ON a.id = r.to_id
                   WHERE a.law_id = l.id) AS in_deg
-               FROM laws l""")
+               FROM laws l
+               WHERE l.duplicate_of IS NULL AND l.superseded_by IS NULL""")
     ]
     edges = [
         {"s": r["s"], "t": r["t"], "rel_type": r["rel_type"]}
@@ -66,3 +68,26 @@ def build_graph(db: sqlite3.Connection) -> dict:
                JOIN articles ta ON ta.id = r.to_id""")
     ]
     return {"nodes": nodes, "edges": edges}
+
+
+_CACHE = {"key": None, "data": None, "ts": 0.0}
+
+
+def build_graph_cached(db: sqlite3.Connection, ttl: float = 60.0) -> dict:
+    """图谱数据缓存：数据规模/更新时间变化或 TTL 过期时重算。"""
+    import time
+
+    key = (
+        db.execute("SELECT count(*) FROM laws").fetchone()[0],
+        db.execute("SELECT max(updated_at) FROM laws").fetchone()[0],
+        db.execute("SELECT count(*) FROM relations").fetchone()[0],
+        db.execute("SELECT max(id) FROM relations").fetchone()[0],
+        db.execute("SELECT count(*) FROM laws WHERE duplicate_of IS NOT NULL").fetchone()[0],
+        db.execute("SELECT count(*) FROM laws WHERE superseded_by IS NOT NULL").fetchone()[0],
+    )
+    now = time.time()
+    if _CACHE["key"] == key and now - _CACHE["ts"] < ttl:
+        return _CACHE["data"]
+    data = build_graph(db)
+    _CACHE.update({"key": key, "data": data, "ts": now})
+    return data
