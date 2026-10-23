@@ -98,6 +98,23 @@ def test_extract_citations_no_match(db):
     assert _extract_citations(db, "没有引用格式的回答") == []
 
 
+def test_extract_citations_includes_source_url(db):
+    db.execute("UPDATE laws SET source_url='https://example.com/law'")
+    db.commit()
+    citations = _extract_citations(db, "【中华人民共和国证券法·第五十条】")
+    assert citations and citations[0]["source_url"] == "https://example.com/law"
+
+
+def test_extract_citations_excludes_duplicate_law(db):
+    law_id = db.execute("SELECT id FROM laws").fetchone()[0]
+    db.execute(
+        "INSERT INTO laws(title, level, content_hash, duplicate_of, quality_flag) "
+        "VALUES('中华人民共和国证券法','法律','h2',?,'duplicate')", (law_id,))
+    db.commit()
+    citations = _extract_citations(db, "【中华人民共和国证券法·第五十条】")
+    assert citations and citations[0]["law_id"] == law_id
+
+
 def test_system_prompt_rules():
     assert "禁止编造" in SYSTEM_PROMPT
     assert "search_laws" in SYSTEM_PROMPT

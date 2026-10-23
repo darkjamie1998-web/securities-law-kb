@@ -235,6 +235,10 @@ mark { background: #ffe58f; padding: 0 2px; }
   height: 550px;                                  /* 旧浏览器回退 */
   width: min(400px, calc(100vw - 48px));          /* 新浏览器自适应 */
   height: min(550px, calc(100vh - 140px));
+  min-width: 320px;                               /* 可拖拽调节的边界 */
+  min-height: 360px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -269,7 +273,8 @@ mark { background: #ffe58f; padding: 0 2px; }
 }
 .btn-icon-flat:hover { background: rgba(255,255,255,0.2); }
 .chat-panel .chat-log { flex: 1; max-height: none; padding: 10px 14px; margin-bottom: 0; }
-.chat-panel .chat-input-row { padding: 10px 14px; border-top: 1px solid var(--border); }
+/* 右侧留出 resize 手柄空间，避免遮挡发送按钮 */
+.chat-panel .chat-input-row { padding: 10px 26px 10px 14px; border-top: 1px solid var(--border); }
 .chat-log {
   max-height: 240px;
   overflow-y: auto;
@@ -291,9 +296,54 @@ mark { background: #ffe58f; padding: 0 2px; }
   padding: 0 6px;
   margin: 2px 3px;
   font-size: 12px;
-  cursor: pointer;
+  cursor: default;
 }
+.cite-chip[data-law] .cite-main { cursor: pointer; }
 .cite-chip:hover { background: #c5d8ef; }
+.cite-wrap { display: inline-block; margin: 2px 3px; white-space: nowrap; }
+.cite-wrap .cite-chip { margin: 0; }
+.cite-src {
+  display: inline-block;
+  margin-left: 4px;
+  color: var(--primary-dark);
+  text-decoration: none;
+  font-weight: 600;
+  padding: 0 2px;
+}
+.cite-src:hover { text-decoration: underline; }
+.cite-row { margin-top: 4px; }
+
+/* 对话面板右下角拖拽手柄 */
+.chat-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 2;
+}
+.chat-resize::before,
+.chat-resize::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  opacity: 0.55;
+}
+.chat-resize::after {
+  right: 7px;
+  bottom: 7px;
+  width: 5px;
+  height: 5px;
+}
+.chat-resize:hover::before,
+.chat-resize:hover::after { opacity: 1; }
+body.chat-resizing { cursor: nwse-resize; user-select: none; }
 .chat-input-row { display: flex; }
 .chat-input-row > * + * { margin-left: 8px; }
 .chat-input-row input {

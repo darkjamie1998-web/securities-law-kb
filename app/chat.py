@@ -128,12 +128,16 @@ def _extract_citations(db, content: str) -> list[dict]:
         if key in seen:
             continue
         seen.add(key)
+        # 只匹配现行、非重复版本；多个同名法规时选标题最短的（简称优先）
+        eq = title.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         row = db.execute(
             """SELECT a.id AS article_id, a.article_no, l.id AS law_id, l.title,
                       l.source_url
                FROM articles a JOIN laws l ON a.law_id = l.id
-               WHERE l.title LIKE ? AND a.article_no = ? LIMIT 1""",
-            (f"%{title}%", article_no),
+               WHERE l.title LIKE ? ESCAPE '\\' AND a.article_no = ?
+                 AND l.duplicate_of IS NULL AND l.superseded_by IS NULL
+               ORDER BY length(l.title) LIMIT 1""",
+            (f"%{eq}%", article_no),
         ).fetchone()
         if row:
             out.append({

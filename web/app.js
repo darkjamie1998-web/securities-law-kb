@@ -339,11 +339,35 @@ function highlight(text, q) {
 // ---------- 对话（悬浮面板） ----------
 function chatPanelOpen() { return !$("chatPanel").classList.contains("hidden"); }
 
+function clampChatPanel(panel) {
+  // 面板隐藏时 getBoundingClientRect 为 0，不能夹取，否则会破坏默认尺寸
+  if (!panel || panel.classList.contains("hidden")) return;
+  const r = panel.getBoundingClientRect();
+  const maxW = Math.max(320, innerWidth - 16);
+  const maxH = Math.max(360, innerHeight - 16);
+  const w = Math.min(Math.max(320, r.width), maxW);
+  const h = Math.min(Math.max(360, r.height), maxH);
+  let x = r.left, y = r.top;
+  if (panel.style.right !== "auto" || panel.style.bottom !== "auto") {
+    x = innerWidth - 24 - w;
+    y = innerHeight - 92 - h;
+  }
+  x = Math.min(Math.max(8, x), Math.max(8, innerWidth - w - 8));
+  y = Math.min(Math.max(8, y), Math.max(8, innerHeight - h - 8));
+  panel.style.width = w + "px";
+  panel.style.height = h + "px";
+  panel.style.left = x + "px";
+  panel.style.top = y + "px";
+  panel.style.right = "auto";
+  panel.style.bottom = "auto";
+}
+
 function toggleChat(open) {
   const panel = $("chatPanel");
   panel.classList.toggle("hidden", !open);
   if (open) {
     $("chatDot").classList.add("hidden");  // 打开即消红点
+    clampChatPanel(panel);                 // 窗口变小后再次打开时收进视口
     const log = $("chatLog");
     log.scrollTop = log.scrollHeight;
     $("chatInput").focus();
@@ -354,16 +378,57 @@ function initChatPanel() {
   $("chatFab").onclick = () => toggleChat(!chatPanelOpen());
   $("btnMinChat").onclick = () => toggleChat(false);
 
-  // 标题栏拖动：记录位置到 localStorage（夹在视口内，防拖丢）
   const head = $("chatPanelHead"), panel = $("chatPanel");
-  let drag = null;
+  const resizeHandle = $("chatResize");
+  let drag = null, resize = null;
+
+  // 标题栏拖动：记录位置到 localStorage（夹在视口内，防拖丢）
   head.addEventListener("mousedown", e => {
     if (e.target.closest("button")) return;  // 最小化按钮不触发拖动
     const r = panel.getBoundingClientRect();
     drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
     e.preventDefault();
   });
+
+  // 右下角手柄：自由调节宽高；先转成 left/top 定位，让右下角跟随鼠标
+  resizeHandle.addEventListener("mousedown", e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const r = panel.getBoundingClientRect();
+    panel.style.left = r.left + "px";
+    panel.style.top = r.top + "px";
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+    resize = {
+      sx: e.clientX, sy: e.clientY, w: r.width, h: r.height,
+      right: r.left + r.width, bottom: r.top + r.height
+    };
+    document.body.classList.add("chat-resizing");
+  });
+
+  resizeHandle.addEventListener("dblclick", () => {
+    panel.style.width = "400px";
+    panel.style.height = "550px";
+    localStorage.removeItem("chatPanelSize");
+    clampChatPanel(panel);
+  });
+
   window.addEventListener("mousemove", e => {
+    if (resize) {
+      const dx = e.clientX - resize.sx, dy = e.clientY - resize.sy;
+      const w = Math.min(innerWidth - 16, Math.max(320, resize.w + dx));
+      const h = Math.min(innerHeight - 16, Math.max(360, resize.h + dy));
+      // 右下角跟随鼠标；贴到视口边缘时面板向左/上扩展，避免宽度被卡死
+      const right = resize.right + dx, bottom = resize.bottom + dy;
+      const x = Math.min(Math.max(8, right - w), Math.max(8, innerWidth - w - 8));
+      const y = Math.min(Math.max(8, bottom - h), Math.max(8, innerHeight - h - 8));
+      panel.style.width = w + "px";
+      panel.style.height = h + "px";
+      panel.style.left = x + "px";
+      panel.style.top = y + "px";
+      return;
+    }
     if (!drag) return;
     const w = panel.offsetWidth, h = panel.offsetHeight;
     const x = Math.min(Math.max(e.clientX - drag.dx, 0), innerWidth - w);
@@ -374,10 +439,31 @@ function initChatPanel() {
     panel.style.bottom = "auto";
     localStorage.setItem("chatPanelPos", JSON.stringify({ x, y }));
   });
-  window.addEventListener("mouseup", () => { drag = null; });
 
-  // 恢复上次拖动位置
+  window.addEventListener("mouseup", () => {
+    drag = null;
+    if (resize) {
+      resize = null;
+      document.body.classList.remove("chat-resizing");
+      const r = panel.getBoundingClientRect();
+      localStorage.setItem("chatPanelSize", JSON.stringify({
+        w: Math.round(r.width), h: Math.round(r.height)
+      }));
+      localStorage.setItem("chatPanelPos", JSON.stringify({
+        x: Math.round(r.left), y: Math.round(r.top)
+      }));
+    }
+  });
+
+  window.addEventListener("resize", () => { clampChatPanel(panel); });
+
+  // 恢复上次尺寸与拖动位置（先尺寸后位置，位置按新尺寸夹取）
   try {
+    const size = JSON.parse(localStorage.getItem("chatPanelSize") || "null");
+    if (size && size.w >= 320 && size.h >= 360) {
+      panel.style.width = size.w + "px";
+      panel.style.height = size.h + "px";
+    }
     const pos = JSON.parse(localStorage.getItem("chatPanelPos") || "null");
     if (pos && pos.x >= 0 && pos.y >= 0) {
       const w = panel.offsetWidth || 400, h = panel.offsetHeight || 550;
@@ -388,7 +474,7 @@ function initChatPanel() {
         panel.style.bottom = "auto";
       }
     }
-  } catch (_) { /* 忽略损坏的位置记录 */ }
+  } catch (_) { /* 忽略损坏的位置/尺寸记录 */ }
 }
 
 async function sendChat() {
@@ -410,15 +496,24 @@ async function sendChat() {
     }
     html += renderInline(r.content);
     if (r.citations && r.citations.length) {
-      html += "<div>" + r.citations.map(c =>
-        `<span class="cite-chip" data-law="${c.law_id}" data-no="${esc(c.article_no)}">📖 ${esc(c.title)} ${esc(c.article_no)}</span>`
-      ).join("") + "</div>";
+      html += '<div class="cite-row">' + r.citations.map(c => {
+        const url = safeUrl(c.source_url);
+        const src = url !== "#"
+          ? `<a class="cite-src" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="打开官方原文">↗</a>`
+          : "";
+        return `<span class="cite-wrap"><span class="cite-chip" data-law="${esc(c.law_id)}" data-no="${esc(c.article_no)}" title="点击定位法条${src ? "；↗ 打开官方原文" : ""}"><span class="cite-main">📖 ${esc(c.title)} ${esc(c.article_no)}</span></span>${src}</span>`;
+      }).join("") + "</div>";
     }
     aiDiv.innerHTML = html;
-    aiDiv.querySelectorAll(".cite-chip").forEach(chip => {
-      // 正文里由【】渲染出的装饰性 chip 没有 data-law，不可点击（否则 NaN → 422 → 界面卡死）
-      if (!chip.dataset.law) return;
-      chip.onclick = () => loadLawDetail(parseInt(chip.dataset.law), chip.dataset.no || null);
+    // 外链图标点击不冒泡到引用 chip，避免同时触发面板内跳转
+    aiDiv.querySelectorAll(".cite-src").forEach(a => {
+      a.addEventListener("click", e => e.stopPropagation());
+    });
+    aiDiv.querySelectorAll(".cite-chip[data-law]").forEach(chip => {
+      // 只给主体绑定面板内跳转；外链 ↗ 是兄弟节点，不会误触发
+      const main = chip.querySelector(".cite-main");
+      if (!main) return;
+      main.onclick = () => loadLawDetail(parseInt(chip.dataset.law), chip.dataset.no || null);
     });
     chatHistory.push({ role: "assistant", content: r.content });
   } catch (e) {
