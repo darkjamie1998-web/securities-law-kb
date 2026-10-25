@@ -313,6 +313,11 @@ mark { background: #ffe58f; padding: 0 2px; }
 }
 .cite-src:hover { text-decoration: underline; }
 .cite-row { margin-top: 4px; }
+.cite-row.cite-flash {
+  background: #fff8d6;
+  outline: 2px solid #f0c36d;
+  border-radius: 4px;
+}
 
 /* 对话面板右下角拖拽手柄 */
 .chat-resize {

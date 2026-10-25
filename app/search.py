@@ -67,6 +67,22 @@ def parse_citation(query: str):
     return title, f"第{_int_to_cn(n)}条"
 
 
+def normalize_article_no(no: str) -> str:
+    """把「第191条 / 第191条（经…修改）」统一成数据库使用的中文条号「第一百九十一条」。
+
+    阿拉伯数字与中文数字混写（如模型偶发输出的「第19十一条」）无法可靠判断原意，
+    直接返回原文使其查不到，避免被误解析成「第十一条」而跳错法条。
+    """
+    m = re.match(r"^\s*第([一二三四五六七八九十百千零〇\d]+)条", str(no or ""))
+    if not m:
+        return str(no or "").strip()
+    raw = m.group(1)
+    if re.search(r"\d", raw) and re.search(r"[一二三四五六七八九十百千零〇]", raw):
+        return str(no).strip()
+    n = _cn_to_int(raw)
+    return f"第{_int_to_cn(n)}条" if n else str(no).strip()
+
+
 # ---------- 查询分词 ----------
 
 def _load_stopwords() -> set[str]:

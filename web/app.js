@@ -508,10 +508,21 @@ async function sendChat() {
     // 正文中的【法规名·第X条】用本轮 citations 匹配后，点击直接打开数据库原文
     aiDiv.querySelectorAll(".cite-chip:not([data-law])").forEach(chip => {
       const hit = findCitation(r.citations || [], parseCiteText(chip.textContent));
-      if (!hit) return;
-      chip.classList.add("cite-inline");
-      chip.title = "点击查看法条原文";
-      chip.onclick = () => loadLawDetail(hit.law_id, hit.article_no);
+      const citeRow = aiDiv.querySelector(".cite-row");
+      if (hit) {
+        chip.classList.add("cite-inline");
+        chip.title = "点击查看法条原文";
+        chip.onclick = () => loadLawDetail(hit.law_id, hit.article_no);
+      } else if (citeRow) {
+        // 条号写法无法可靠匹配时，退化为滚动定位到下方 citations 列表
+        chip.classList.add("cite-inline");
+        chip.title = "点击查看下方引用列表";
+        chip.onclick = () => {
+          citeRow.scrollIntoView({ block: "nearest" });
+          citeRow.classList.add("cite-flash");
+          setTimeout(() => citeRow.classList.remove("cite-flash"), 1200);
+        };
+      }
     });
     // 外链图标点击不冒泡到引用 chip，避免同时触发面板内跳转
     aiDiv.querySelectorAll(".cite-src").forEach(a => {
@@ -627,22 +638,55 @@ function renderMarkdown(md) {
 }
 
 // 正文引用匹配：解析【法规名·第X条】，在同轮 citations 中找对应法规/条号
-function parseCiteText(text) {
-  const m = String(text || "").match(/^【(.+?)·(.+?)】$/);
+function cnToInt(s) {
+  const digits = "零一二三四五六七八九";
+  s = String(s || "").replace(/〇/g, "零");
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  let section = 0, num = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charAt(i);
+    const d = digits.indexOf(ch);
+    if (d >= 0) num = d;
+    else if (ch === "十") { section += (num || 1) * 10; num = 0; }
+    else if (ch === "百") { section += (num || 1) * 100; num = 0; }
+    else if (ch === "千") { section += (num || 1) * 1000; num = 0; }
+  }
+  return section + num;
+}
+
+function articleNoValue(no) {
+  const m = String(no || "").match(/第([一二三四五六七八九十百千零〇\d]+)条/);
   if (!m) return null;
-  return { title: m[1].trim(), no: m[2].trim() };
+  // 阿拉伯数字与中文混写（第19十一条）无法可靠还原，不做猜测
+  if (/\d/.test(m[1]) && /[一二三四五六七八九十百千零〇]/.test(m[1])) return null;
+  return cnToInt(m[1]);
+}
+
+function parseCiteText(text) {
+  const m = String(text || "").match(/^【(.+?)】$/);
+  if (!m) return null;
+  // 一个【】可能包含多个引用（；分隔），正文 chip 跳第一个
+  const first = m[1].split(/[；;]/)[0];
+  const m2 = first.match(/^(.+?)·(.+)$/);
+  if (!m2) return null;
+  return { title: m2[1].trim(), no: m2[2].trim() };
 }
 
 function findCitation(citations, parsed) {
   if (!parsed || !citations || !citations.length) return null;
+  const normTitle = function(s) {
+    return String(s || "").replace(/[【】《》()（）\s]/g, "");
+  };
   const titleMatch = function(c) {
-    const a = String(c.title || ""), b = parsed.title;
+    const a = normTitle(c.title), b = normTitle(parsed.title);
     if (!a || !b) return false;
     return a === b || a.indexOf(b) >= 0 || b.indexOf(a) >= 0;
   };
-  const exact = citations.filter(c => c.article_no === parsed.no && titleMatch(c));
+  const value = articleNoValue(parsed.no);
+  const exact = value == null ? [] : citations.filter(
+    c => articleNoValue(c.article_no) === value && titleMatch(c));
   if (exact.length) return exact[0];
-  // 条号写法不一致（第50条 vs 第五十条）时，只有唯一同名法规才降级跳转
+  // 条号写法不一致时，只有唯一同名法规才降级跳转
   const byTitle = citations.filter(titleMatch);
   return byTitle.length === 1 ? byTitle[0] : null;
 }

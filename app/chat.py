@@ -2,7 +2,7 @@
 import json
 import re
 
-from app.search import hybrid_search
+from app.search import hybrid_search, normalize_article_no
 
 TOOLS = [{
     "type": "function",
@@ -116,33 +116,58 @@ def agent_chat(db, llm, messages: list[dict], max_rounds: int = MAX_ROUNDS) -> d
             "searches": searches, "rounds": rounds}
 
 
-CITATION_RE = re.compile(r"【([^】]+?)·(第[^条】]+条)】")
+# 一个【】里可能放多个引用（用；分隔），例如：
+# 【证监会令第227号·第七十条；证监会令第166号·第四十条】
+CITATION_BLOCK_RE = re.compile(r"【([^】]+)】")
+CITATION_ITEM_RE = re.compile(
+    r"^(.+?)·(第[一二三四五六七八九十百千零〇\d]+条)")
+
+
+def _lookup_citation(db, title: str, article_no: str):
+    """按标题+规范化条号查现行法规条文，返回可跳转定位。"""
+    title = title.strip().strip("《》")
+    no = normalize_article_no(article_no)
+    base = """SELECT a.id AS article_id, a.article_no, l.id AS law_id, l.title,
+                     l.source_url
+              FROM articles a JOIN laws l ON a.law_id = l.id
+              WHERE {cond} AND a.article_no = ?
+                AND l.duplicate_of IS NULL AND l.superseded_by IS NULL
+              ORDER BY length(l.title) LIMIT 1"""
+    # 先精确标题；再简称/全称包含匹配
+    row = db.execute(base.format(cond="l.title = ?"), (title, no)).fetchone()
+    if row is None:
+        eq = title.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        row = db.execute(base.format(cond="l.title LIKE ? ESCAPE '\\'"),
+                         (f"%{eq}%", no)).fetchone()
+    if row is None:
+        return None
+    return {
+        "article_id": row["article_id"], "law_id": row["law_id"],
+        "title": row["title"], "article_no": row["article_no"],
+        "source_url": row["source_url"],
+    }
 
 
 def _extract_citations(db, content: str) -> list[dict]:
-    """从回答文本提取【法规名·条号】引用，并解析为可跳转的法条定位。"""
+    """从回答文本提取【法规名·条号】引用，并解析为可跳转的法条定位。
+
+    兼容模型输出的三种差异：
+    - 阿拉伯数字条号（第191条）与数据库中文条号（第一百九十一条）；
+    - 一个【】内多个引用（用；分隔）；
+    - 简称法规名（证券法）与全称（中华人民共和国证券法）。
+    """
     out, seen = [], set()
-    for m in CITATION_RE.finditer(content):
-        title, article_no = m.group(1).strip(), m.group(2).strip()
-        key = (title, article_no)
-        if key in seen:
-            continue
-        seen.add(key)
-        # 只匹配现行、非重复版本；多个同名法规时选标题最短的（简称优先）
-        eq = title.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        row = db.execute(
-            """SELECT a.id AS article_id, a.article_no, l.id AS law_id, l.title,
-                      l.source_url
-               FROM articles a JOIN laws l ON a.law_id = l.id
-               WHERE l.title LIKE ? ESCAPE '\\' AND a.article_no = ?
-                 AND l.duplicate_of IS NULL AND l.superseded_by IS NULL
-               ORDER BY length(l.title) LIMIT 1""",
-            (f"%{eq}%", article_no),
-        ).fetchone()
-        if row:
-            out.append({
-                "article_id": row["article_id"], "law_id": row["law_id"],
-                "title": row["title"], "article_no": row["article_no"],
-                "source_url": row["source_url"],
-            })
+    for block in CITATION_BLOCK_RE.finditer(content or ""):
+        for item in re.split(r"[；;]", block.group(1)):
+            m = CITATION_ITEM_RE.search(item.strip())
+            if not m:
+                continue
+            title, raw_no = m.group(1).strip(), m.group(2).strip()
+            key = (title, normalize_article_no(raw_no))
+            if key in seen:
+                continue
+            seen.add(key)
+            hit = _lookup_citation(db, title, raw_no)
+            if hit:
+                out.append(hit)
     return out

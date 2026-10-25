@@ -54,7 +54,10 @@ $PY tools/data_cleanup.py --report                 # 数据质量报告（自动
 - **图谱 runner**（`run_relations_forever.py`）：msvcrt 实例文件锁（进程死亡自动释放）+ 看门狗（45 分钟无产出自杀）。**同机只能跑一个实例**
 - **前端 XSS 防线**：`web/app.js` 的 `renderInline/renderMarkdown` 内部自带 `esc()`——新增渲染路径**不要**先手动 esc 再传入（会双重转义）；外链一律过 `safeUrl()`
 - **前端语法兼容底线 ES2017**（2026-09-28 搜索失效事故教训）：用户在金融内网用旧版浏览器（Chromium <80），`??`/`?.`（ES2020）、`trimEnd`（ES2019）这类语法会**挂掉整个 app.js 文件**（语法错误是文件级的，一处不支持全部交互失效）。写前端代码只用 ES2017 及以下语法；CSS 的新函数（`min()` 等）必须先写旧值回退再写新值；flex `gap` 在 Chromium <84 失效，关键布局用子元素 margin 替代
-- **对话面板**：尺寸存 `localStorage.chatPanelSize`、位置存 `chatPanelPos`；引用外链必须是独立 `<a>`（不要嵌在可点击 chip 内），否则点击冒泡会误触发面板内跳转；正文 `【法规·第X条】` 按本轮 citations 匹配后才绑定跳转，匹配不到保持普通文本，禁止猜测 law_id
+- **对话面板**：尺寸存 `localStorage.chatPanelSize`、位置存 `chatPanelPos`；引用外链必须是独立 `<a>`（不要嵌在可点击 chip 内），否则点击冒泡会误触发面板内跳转；正文 `【法规·第X条】` 按本轮 citations 匹配后才绑定跳转，匹配不到则滚动定位下方 citations 列表，禁止猜测 law_id
+- **引用条号归一化**：模型可能输出 `第191条` / `第一百九十一条`；后端 `normalize_article_no` 统一成数据库中文条号。阿拉伯数字与中文混写（如笔误 `第19十一条`）不猜测，避免误跳成第十一条；前端 `articleNoValue` 同规则
+- **多引用拆分**：一个 `【】` 内的 `；` 分隔引用由后端拆分逐条匹配；前端正文 chip 点击跳第一个可匹配项
+- **静态资源缓存**：`index.html` 的 CSS/JS 带 `?v=` 版本参数；改前端后必须 bump 版本号，否则内网浏览器可能继续用旧 app.js
 
 ## 数据与索引（2026-10-22 引入）
 

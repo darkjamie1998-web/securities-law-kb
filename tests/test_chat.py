@@ -105,6 +105,27 @@ def test_extract_citations_includes_source_url(db):
     assert citations and citations[0]["source_url"] == "https://example.com/law"
 
 
+def test_extract_citations_normalizes_arabic_article_no(db):
+    citations = _extract_citations(db, "【证券法·第50条】")
+    assert citations and citations[0]["article_no"] == "第五十条"
+
+
+def test_extract_citations_ignores_ambiguous_mixed_no(db):
+    # 第19十一条 是模型笔误，不能误解析成第十一条
+    assert _extract_citations(db, "【证券法·第19十一条】") == []
+
+
+def test_extract_citations_splits_multiple_refs(db):
+    law_id = db.execute("SELECT id FROM laws").fetchone()[0]
+    db.execute(
+        "INSERT INTO articles(law_id, article_no, text) VALUES(?,?,?)",
+        (law_id, "第一百九十一条", "证券交易内幕信息知情人从事内幕交易的处罚。"))
+    db.commit()
+    citations = _extract_citations(
+        db, "【证券法·第50条；证券法·第191条】")
+    assert [c["article_no"] for c in citations] == ["第五十条", "第一百九十一条"]
+
+
 def test_extract_citations_excludes_duplicate_law(db):
     law_id = db.execute("SELECT id FROM laws").fetchone()[0]
     db.execute(

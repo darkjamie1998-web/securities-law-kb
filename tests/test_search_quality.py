@@ -3,7 +3,7 @@ import pytest
 
 from app.db import get_db, init_db
 from app.seg_index import ensure_schema, rebuild_all
-from app.search import parse_citation, hybrid_search
+from app.search import parse_citation, hybrid_search, normalize_article_no
 
 
 @pytest.fixture
@@ -51,6 +51,14 @@ def test_parse_citation_variants():
         "中华人民共和国证券法", "第一百九十一条")
     assert parse_citation("证券法第50条") == ("证券法", "第五十条")
     assert parse_citation("内幕交易怎么处罚") is None
+
+
+def test_normalize_article_no():
+    assert normalize_article_no("第191条") == "第一百九十一条"
+    assert normalize_article_no("第一百九十一条") == "第一百九十一条"
+    assert normalize_article_no("第50条（经修正案修改）") == "第五十条"
+    # 混合写法的笔误不猜测，避免误跳成第十一条
+    assert normalize_article_no("第19十一条") == "第19十一条"
 
 
 def test_exact_article_ranks_first(db):
