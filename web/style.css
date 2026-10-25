@@ -299,6 +299,7 @@ mark { background: #ffe58f; padding: 0 2px; }
   cursor: default;
 }
 .cite-chip[data-law] .cite-main { cursor: pointer; }
+.cite-chip.cite-inline { cursor: pointer; }
 .cite-chip:hover { background: #c5d8ef; }
 .cite-wrap { display: inline-block; margin: 2px 3px; white-space: nowrap; }
 .cite-wrap .cite-chip { margin: 0; }

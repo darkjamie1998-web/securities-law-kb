@@ -505,6 +505,14 @@ async function sendChat() {
       }).join("") + "</div>";
     }
     aiDiv.innerHTML = html;
+    // 正文中的【法规名·第X条】用本轮 citations 匹配后，点击直接打开数据库原文
+    aiDiv.querySelectorAll(".cite-chip:not([data-law])").forEach(chip => {
+      const hit = findCitation(r.citations || [], parseCiteText(chip.textContent));
+      if (!hit) return;
+      chip.classList.add("cite-inline");
+      chip.title = "点击查看法条原文";
+      chip.onclick = () => loadLawDetail(hit.law_id, hit.article_no);
+    });
     // 外链图标点击不冒泡到引用 chip，避免同时触发面板内跳转
     aiDiv.querySelectorAll(".cite-src").forEach(a => {
       a.addEventListener("click", e => e.stopPropagation());
@@ -616,6 +624,27 @@ function renderMarkdown(md) {
   }
   flush();
   return html;
+}
+
+// 正文引用匹配：解析【法规名·第X条】，在同轮 citations 中找对应法规/条号
+function parseCiteText(text) {
+  const m = String(text || "").match(/^【(.+?)·(.+?)】$/);
+  if (!m) return null;
+  return { title: m[1].trim(), no: m[2].trim() };
+}
+
+function findCitation(citations, parsed) {
+  if (!parsed || !citations || !citations.length) return null;
+  const titleMatch = function(c) {
+    const a = String(c.title || ""), b = parsed.title;
+    if (!a || !b) return false;
+    return a === b || a.indexOf(b) >= 0 || b.indexOf(a) >= 0;
+  };
+  const exact = citations.filter(c => c.article_no === parsed.no && titleMatch(c));
+  if (exact.length) return exact[0];
+  // 条号写法不一致（第50条 vs 第五十条）时，只有唯一同名法规才降级跳转
+  const byTitle = citations.filter(titleMatch);
+  return byTitle.length === 1 ? byTitle[0] : null;
 }
 
 // 行内渲染自带 HTML 转义：renderInline 是"安全渲染"入口，调用方无需先 esc
