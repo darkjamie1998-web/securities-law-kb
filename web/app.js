@@ -501,18 +501,30 @@ async function sendChat() {
         const src = url !== "#"
           ? `<a class="cite-src" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="打开官方原文">↗</a>`
           : "";
-        return `<span class="cite-wrap"><span class="cite-chip" data-law="${esc(c.law_id)}" data-no="${esc(c.article_no)}" title="点击定位法条${src ? "；↗ 打开官方原文" : ""}"><span class="cite-main">📖 ${esc(c.title)} ${esc(c.article_no)}</span></span>${src}</span>`;
+        const label = `📖 ${esc(c.title)} ${esc(c.article_no)}`;
+        if (c.law_id == null) {
+          // 库内未收录：仍列出引用，保证与正文一一对应
+          return `<span class="cite-wrap"><span class="cite-chip cite-unmatched" title="库内未收录该法规原文">${label}</span></span>`;
+        }
+        const hasArticle = c.article_id != null;
+        const noAttr = hasArticle ? ` data-no="${esc(c.article_no)}"` : "";
+        const hint = hasArticle ? "点击定位法条" : "点击查看法规（条号未定位）";
+        return `<span class="cite-wrap"><span class="cite-chip" data-law="${esc(c.law_id)}"${noAttr} title="${hint}${src ? "；↗ 打开官方原文" : ""}"><span class="cite-main">${label}</span></span>${src}</span>`;
       }).join("") + "</div>";
     }
     aiDiv.innerHTML = html;
     // 正文中的【法规名·第X条】用本轮 citations 匹配后，点击直接打开数据库原文
     aiDiv.querySelectorAll(".cite-chip:not([data-law])").forEach(chip => {
+      // 下方 reference 中“库内未收录”的 chip 也是无 data-law，跳过，只处理正文
+      if (chip.closest(".cite-row")) return;
       const hit = findCitation(r.citations || [], parseCiteText(chip.textContent));
       const citeRow = aiDiv.querySelector(".cite-row");
-      if (hit) {
+      if (hit && hit.law_id != null) {
         chip.classList.add("cite-inline");
-        chip.title = "点击查看法条原文";
-        chip.onclick = () => loadLawDetail(hit.law_id, hit.article_no);
+        chip.title = hit.article_id != null
+          ? "点击查看法条原文" : "点击查看法规（条号未定位）";
+        chip.onclick = () => loadLawDetail(
+          hit.law_id, hit.article_id != null ? hit.article_no : null);
       } else if (citeRow) {
         // 条号写法无法可靠匹配时，退化为滚动定位到下方 citations 列表
         chip.classList.add("cite-inline");
@@ -678,13 +690,13 @@ function findCitation(citations, parsed) {
     return String(s || "").replace(/[【】《》()（）\s]/g, "");
   };
   const titleMatch = function(c) {
-    const a = normTitle(c.title), b = normTitle(parsed.title);
+    const a = normTitle(c.ref_title || c.title), b = normTitle(parsed.title);
     if (!a || !b) return false;
     return a === b || a.indexOf(b) >= 0 || b.indexOf(a) >= 0;
   };
   const value = articleNoValue(parsed.no);
   const exact = value == null ? [] : citations.filter(
-    c => articleNoValue(c.article_no) === value && titleMatch(c));
+    c => articleNoValue(c.ref_no || c.article_no) === value && titleMatch(c));
   if (exact.length) return exact[0];
   // 条号写法不一致时，只有唯一同名法规才降级跳转
   const byTitle = citations.filter(titleMatch);

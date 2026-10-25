@@ -123,40 +123,117 @@ CITATION_ITEM_RE = re.compile(
     r"^(.+?)·(第[一二三四五六七八九十百千零〇\d]+条)")
 
 
-def _lookup_citation(db, title: str, article_no: str):
-    """按标题+规范化条号查现行法规条文，返回可跳转定位。"""
+_ALIASES = (
+    ("最高检", "最高人民检察院"),
+    ("最高法", "最高人民法院"),
+    ("证监会", "中国证券监督管理委员会"),
+)
+
+
+def _title_variants(title: str) -> list[str]:
+    """标题变体：全称/简称、去掉年份版本括号。"""
+    t = str(title or "").strip().strip("《》").strip()
+    if not t:
+        return []
+    out = [t]
+    for short, full in _ALIASES:
+        if short in t:
+            alt = t.replace(short, full)
+            if alt not in out:
+                out.append(alt)
+    cleaned = re.sub(r"[（(]\d{4}年?(?:修订|修正)?[）)]", "", t).strip()
+    if cleaned and cleaned not in out:
+        out.append(cleaned)
+    return out
+
+
+def _fuzzy_keys(title: str) -> list[str]:
+    """从长标题中提取可用于 LIKE 的核心片段（书名号内名称、按顿号切分）。"""
+    keys: list[str] = []
+    for part in re.split(r"[、，,；;]", str(title or "")):
+        part = part.strip().strip("《》").strip()
+        if not part:
+            continue
+        m = re.search(r"《([^》]+)》", part)
+        if m:
+            part = m.group(1)
+        part = re.sub(r"[（(]\d{4}年?(?:修订|修正)?[）)]", "", part)
+        part = part.replace("（", "(").replace("）", ")").strip("《》").strip()
+        if len(part) >= 4 and part not in keys:
+            keys.append(part)
+    # 优先含法规类型词、较长的片段，减少误匹配到无关法规
+    keys.sort(key=lambda k: (0 if re.search(
+        r"规定|办法|条例|准则|通知|解释|意见|决定", k) else 1, -len(k)))
+    return keys
+
+
+def _find_law(db, title: str):
+    """按标题找现行法规：精确变体优先，再核心片段模糊匹配。"""
+    sql = """SELECT id, title, source_url FROM laws
+             WHERE title {expr} AND duplicate_of IS NULL
+               AND superseded_by IS NULL
+               AND (quality_flag IS NULL OR quality_flag != 'empty_text')
+             ORDER BY length(title) LIMIT 1"""
+    for v in _title_variants(title):
+        for cand in (v, f"中华人民共和国{v}"):
+            row = db.execute(sql.format(expr="= ?"), (cand,)).fetchone()
+            if row:
+                return row
+        if v.startswith("中华人民共和国"):
+            row = db.execute(sql.format(expr="= ?"),
+                             (v[len("中华人民共和国"):],)).fetchone()
+            if row:
+                return row
+    for v in _title_variants(title):
+        if len(v) < 4:
+            continue
+        for key in (_fuzzy_keys(v) or [v]):
+            if len(key) < 4:
+                continue
+            eq = key.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            row = db.execute(sql.format(expr="LIKE ? ESCAPE '\\'"),
+                             (f"%{eq}%",)).fetchone()
+            if row:
+                return row
+    return None
+
+
+def _lookup_citation(db, title: str, article_no: str) -> dict:
+    """解析单条引用：matched / 仅法规命中（条号未定位）/ 完全未收录。
+
+    无论能否命中都返回条目，保证下方 reference 列表与正文引用一一对应。
+    """
     title = title.strip().strip("《》")
     no = normalize_article_no(article_no)
-    base = """SELECT a.id AS article_id, a.article_no, l.id AS law_id, l.title,
-                     l.source_url
-              FROM articles a JOIN laws l ON a.law_id = l.id
-              WHERE {cond} AND a.article_no = ?
-                AND l.duplicate_of IS NULL AND l.superseded_by IS NULL
-              ORDER BY length(l.title) LIMIT 1"""
-    # 先精确标题；再简称/全称包含匹配
-    row = db.execute(base.format(cond="l.title = ?"), (title, no)).fetchone()
-    if row is None:
-        eq = title.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        row = db.execute(base.format(cond="l.title LIKE ? ESCAPE '\\'"),
-                         (f"%{eq}%", no)).fetchone()
-    if row is None:
-        return None
-    return {
-        "article_id": row["article_id"], "law_id": row["law_id"],
-        "title": row["title"], "article_no": row["article_no"],
-        "source_url": row["source_url"],
+    item = {
+        "title": title, "article_no": no,
+        "ref_title": title, "ref_no": article_no,
+        "law_id": None, "article_id": None, "source_url": None,
     }
+    law = _find_law(db, title)
+    if law is None:
+        return item
+    item.update({"title": law["title"], "law_id": law["id"],
+                 "source_url": law["source_url"]})
+    art = db.execute(
+        "SELECT id FROM articles WHERE law_id=? AND article_no=?",
+        (law["id"], no)).fetchone()
+    if art:
+        item["article_id"] = art["id"]
+        item["article_no"] = no
+    return item
 
 
 def _extract_citations(db, content: str) -> list[dict]:
-    """从回答文本提取【法规名·条号】引用，并解析为可跳转的法条定位。
+    """提取正文全部【法规名·条号】引用，并解析为跳转定位。
 
-    兼容模型输出的三种差异：
+    兼容：
     - 阿拉伯数字条号（第191条）与数据库中文条号（第一百九十一条）；
     - 一个【】内多个引用（用；分隔）；
-    - 简称法规名（证券法）与全称（中华人民共和国证券法）。
+    - 简称/全称/带「关于印发…通知」包装的法规标题；
+    - 库内未收录的法规：保留 citation 项（law_id=None），前端标注未收录。
     """
-    out, seen = [], set()
+    out: dict[tuple, dict] = {}
     for block in CITATION_BLOCK_RE.finditer(content or ""):
         for item in re.split(r"[；;]", block.group(1)):
             m = CITATION_ITEM_RE.search(item.strip())
@@ -164,10 +241,9 @@ def _extract_citations(db, content: str) -> list[dict]:
                 continue
             title, raw_no = m.group(1).strip(), m.group(2).strip()
             key = (title, normalize_article_no(raw_no))
-            if key in seen:
-                continue
-            seen.add(key)
             hit = _lookup_citation(db, title, raw_no)
-            if hit:
-                out.append(hit)
-    return out
+            prev = out.get(key)
+            # 同一引用出现多次时优先保留能定位到法规的版本
+            if prev is None or (prev["law_id"] is None and hit["law_id"] is not None):
+                out[key] = hit
+    return list(out.values())

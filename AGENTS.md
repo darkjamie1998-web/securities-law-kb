@@ -57,6 +57,7 @@ $PY tools/data_cleanup.py --report                 # 数据质量报告（自动
 - **对话面板**：尺寸存 `localStorage.chatPanelSize`、位置存 `chatPanelPos`；引用外链必须是独立 `<a>`（不要嵌在可点击 chip 内），否则点击冒泡会误触发面板内跳转；正文 `【法规·第X条】` 按本轮 citations 匹配后才绑定跳转，匹配不到则滚动定位下方 citations 列表，禁止猜测 law_id
 - **引用条号归一化**：模型可能输出 `第191条` / `第一百九十一条`；后端 `normalize_article_no` 统一成数据库中文条号。阿拉伯数字与中文混写（如笔误 `第19十一条`）不猜测，避免误跳成第十一条；前端 `articleNoValue` 同规则
 - **多引用拆分**：一个 `【】` 内的 `；` 分隔引用由后端拆分逐条匹配；前端正文 chip 点击跳第一个可匹配项
+- **citation 列表完整性**：`_extract_citations` 对每条正文引用都返回条目，分为 matched / 仅法规命中（`article_id=None`，点击进法规详情不定条号）/ 库内未收录（`law_id=None`，前端灰显标注）。禁止因匹配失败直接丢弃引用
 - **静态资源缓存**：`index.html` 的 CSS/JS 带 `?v=` 版本参数；改前端后必须 bump 版本号，否则内网浏览器可能继续用旧 app.js
 
 ## 数据与索引（2026-10-22 引入）

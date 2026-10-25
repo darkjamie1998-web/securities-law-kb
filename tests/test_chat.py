@@ -110,9 +110,26 @@ def test_extract_citations_normalizes_arabic_article_no(db):
     assert citations and citations[0]["article_no"] == "第五十条"
 
 
-def test_extract_citations_ignores_ambiguous_mixed_no(db):
-    # 第19十一条 是模型笔误，不能误解析成第十一条
-    assert _extract_citations(db, "【证券法·第19十一条】") == []
+def test_extract_citations_keeps_law_only_for_mixed_no(db):
+    # 第19十一条 是模型笔误，不能误解析成第十一条；保留法规但不定条号
+    citations = _extract_citations(db, "【证券法·第19十一条】")
+    assert len(citations) == 1
+    assert citations[0]["law_id"] is not None
+    assert citations[0]["article_id"] is None
+
+
+def test_extract_citations_keeps_unmatched_law(db):
+    citations = _extract_citations(db, "【刑法·第180条】")
+    assert len(citations) == 1
+    assert citations[0]["law_id"] is None
+    assert citations[0]["article_no"] == "第一百八十条"
+
+
+def test_extract_citations_keeps_law_without_article(db):
+    citations = _extract_citations(db, "【证券法·第999条】")
+    assert len(citations) == 1
+    assert citations[0]["law_id"] is not None
+    assert citations[0]["article_id"] is None
 
 
 def test_extract_citations_splits_multiple_refs(db):

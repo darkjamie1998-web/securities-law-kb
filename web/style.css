@@ -313,6 +313,7 @@ mark { background: #ffe58f; padding: 0 2px; }
 }
 .cite-src:hover { text-decoration: underline; }
 .cite-row { margin-top: 4px; }
+.cite-chip.cite-unmatched { opacity: 0.62; cursor: default; }
 .cite-row.cite-flash {
   background: #fff8d6;
   outline: 2px solid #f0c36d;
