@@ -119,8 +119,8 @@ def agent_chat(db, llm, messages: list[dict], max_rounds: int = MAX_ROUNDS) -> d
 # 一个【】里可能放多个引用（用；分隔），例如：
 # 【证监会令第227号·第七十条；证监会令第166号·第四十条】
 CITATION_BLOCK_RE = re.compile(r"【([^】]+)】")
-CITATION_ITEM_RE = re.compile(
-    r"^(.+?)·(第[一二三四五六七八九十百千零〇\d]+条)")
+CITATION_ITEM_RE = re.compile(r"^(.+?)·(.+)$")
+ARTICLE_NO_RE = re.compile(r"第[一二三四五六七八九十百千零〇\d]+条")
 
 
 _ALIASES = (
@@ -129,10 +129,30 @@ _ALIASES = (
     ("证监会", "中国证券监督管理委员会"),
 )
 
+# 法规标题里的发文字号括号，如（证监会令第222号）、（法释〔2020〕1号）
+_DOC_NO_RE = re.compile(
+    r"[（(](?:证监会令|证监会公告|主席令|国务院令|财政部令|法释|银发|发改)"
+    r"[^）)]*[）)]")
+
+
+def _clean_title(title: str) -> str:
+    """去掉书名号外层、来源前缀与发文字号，只保留法规核心名。
+
+    例：《公司债券发行与交易管理办法》（证监会令第222号）
+        -> 公司债券发行与交易管理办法
+    """
+    t = str(title or "").strip()
+    m = re.search(r"《([^》]+)》", t)
+    if m:
+        t = m.group(1)
+    t = re.sub(r"^【[^】]*】", "", t)
+    t = _DOC_NO_RE.sub("", t)
+    return t.strip().strip("《》").strip()
+
 
 def _title_variants(title: str) -> list[str]:
-    """标题变体：全称/简称、去掉年份版本括号。"""
-    t = str(title or "").strip().strip("《》").strip()
+    """标题变体：核心名、全称/简称、去掉年份版本括号。"""
+    t = _clean_title(title)
     if not t:
         return []
     out = [t]
@@ -151,12 +171,9 @@ def _fuzzy_keys(title: str) -> list[str]:
     """从长标题中提取可用于 LIKE 的核心片段（书名号内名称、按顿号切分）。"""
     keys: list[str] = []
     for part in re.split(r"[、，,；;]", str(title or "")):
-        part = part.strip().strip("《》").strip()
+        part = _clean_title(part)
         if not part:
             continue
-        m = re.search(r"《([^》]+)》", part)
-        if m:
-            part = m.group(1)
         part = re.sub(r"[（(]\d{4}年?(?:修订|修正)?[）)]", "", part)
         part = part.replace("（", "(").replace("）", ")").strip("《》").strip()
         if len(part) >= 4 and part not in keys:
@@ -167,8 +184,22 @@ def _fuzzy_keys(title: str) -> list[str]:
     return keys
 
 
+def _match_ok(cite_title: str, law_title: str) -> bool:
+    """避免把「关于修改《X》的决定」误当成 X 本身。
+
+    引用标题本身是修改决定、或带证监会令/公告文号时允许匹配修改决定；
+    否则 X 只能匹配标题不含「修改」的法规。
+    """
+    if re.search(r"修改|证监会令|证监会公告|主席令|国务院令|财政部令|法释",
+                 cite_title):
+        return True
+    return "修改" not in law_title
+
+
 def _find_law(db, title: str):
     """按标题找现行法规：精确变体优先，再核心片段模糊匹配。"""
+    # 用原始标题判断是否明确引用“修改决定”；清洗后的核心名会丢掉“修改”语义
+    cite_title = str(title or "").strip()
     sql = """SELECT id, title, source_url FROM laws
              WHERE title {expr} AND duplicate_of IS NULL
                AND superseded_by IS NULL
@@ -177,12 +208,12 @@ def _find_law(db, title: str):
     for v in _title_variants(title):
         for cand in (v, f"中华人民共和国{v}"):
             row = db.execute(sql.format(expr="= ?"), (cand,)).fetchone()
-            if row:
+            if row and _match_ok(cite_title, row["title"]):
                 return row
         if v.startswith("中华人民共和国"):
             row = db.execute(sql.format(expr="= ?"),
                              (v[len("中华人民共和国"):],)).fetchone()
-            if row:
+            if row and _match_ok(cite_title, row["title"]):
                 return row
     for v in _title_variants(title):
         if len(v) < 4:
@@ -193,7 +224,7 @@ def _find_law(db, title: str):
             eq = key.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             row = db.execute(sql.format(expr="LIKE ? ESCAPE '\\'"),
                              (f"%{eq}%",)).fetchone()
-            if row:
+            if row and _match_ok(cite_title, row["title"]):
                 return row
     return None
 
@@ -203,14 +234,15 @@ def _lookup_citation(db, title: str, article_no: str) -> dict:
 
     无论能否命中都返回条目，保证下方 reference 列表与正文引用一一对应。
     """
-    title = title.strip().strip("《》")
+    raw_title = title.strip()
+    clean = _clean_title(title)
     no = normalize_article_no(article_no)
     item = {
-        "title": title, "article_no": no,
-        "ref_title": title, "ref_no": article_no,
+        "title": clean, "article_no": no,
+        "ref_title": raw_title, "ref_no": article_no,
         "law_id": None, "article_id": None, "source_url": None,
     }
-    law = _find_law(db, title)
+    law = _find_law(db, raw_title)
     if law is None:
         return item
     item.update({"title": law["title"], "law_id": law["id"],
@@ -239,11 +271,18 @@ def _extract_citations(db, content: str) -> list[dict]:
             m = CITATION_ITEM_RE.search(item.strip())
             if not m:
                 continue
-            title, raw_no = m.group(1).strip(), m.group(2).strip()
-            key = (title, normalize_article_no(raw_no))
-            hit = _lookup_citation(db, title, raw_no)
-            prev = out.get(key)
-            # 同一引用出现多次时优先保留能定位到法规的版本
-            if prev is None or (prev["law_id"] is None and hit["law_id"] is not None):
-                out[key] = hit
+            title, rest = m.group(1).strip(), m.group(2).strip()
+            if rest.startswith("全文"):
+                raw_nos = ["全文"]
+            else:
+                # 同一引用可能连写多个条号：第十四条、第二十条
+                raw_nos = list(dict.fromkeys(ARTICLE_NO_RE.findall(rest)))
+            for raw_no in raw_nos:
+                key = (title, normalize_article_no(raw_no))
+                hit = _lookup_citation(db, title, raw_no)
+                prev = out.get(key)
+                # 同一引用出现多次时优先保留能定位到法规的版本
+                if prev is None or (prev["law_id"] is None
+                                    and hit["law_id"] is not None):
+                    out[key] = hit
     return list(out.values())

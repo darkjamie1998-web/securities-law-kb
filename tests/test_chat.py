@@ -110,6 +110,23 @@ def test_extract_citations_normalizes_arabic_article_no(db):
     assert citations and citations[0]["article_no"] == "第五十条"
 
 
+def test_extract_citations_title_with_doc_number(db):
+    # 正文常写《法规名》（证监会令第X号），数据库标题可能带【证监会令第X号】前缀
+    cur = db.execute(
+        "INSERT INTO laws(title, level, content_hash) VALUES(?,?,?)",
+        ("【证监会令第222号】公司债券发行与交易管理办法", "部门规章", "h222"))
+    law_id = cur.lastrowid
+    db.execute(
+        "INSERT INTO articles(law_id, article_no, text) VALUES(?,?,?)",
+        (law_id, "第十一条", "发行公司债券，可以附认股权、可转换成相关股票等条款。"))
+    db.commit()
+    citations = _extract_citations(
+        db, "【《公司债券发行与交易管理办法》（证监会令第222号）·第十一条】")
+    assert len(citations) == 1
+    assert citations[0]["law_id"] == law_id
+    assert citations[0]["article_id"] is not None
+
+
 def test_extract_citations_keeps_law_only_for_mixed_no(db):
     # 第19十一条 是模型笔误，不能误解析成第十一条；保留法规但不定条号
     citations = _extract_citations(db, "【证券法·第19十一条】")
@@ -141,6 +158,54 @@ def test_extract_citations_splits_multiple_refs(db):
     citations = _extract_citations(
         db, "【证券法·第50条；证券法·第191条】")
     assert [c["article_no"] for c in citations] == ["第五十条", "第一百九十一条"]
+
+
+def test_extract_citations_splits_comma_articles(db):
+    law_id = db.execute("SELECT id FROM laws").fetchone()[0]
+    db.execute(
+        "INSERT INTO articles(law_id, article_no, text) VALUES(?,?,?)",
+        (law_id, "第一百九十一条", "证券交易内幕信息知情人从事内幕交易的处罚。"))
+    db.commit()
+    citations = _extract_citations(db, "【证券法·第50条、第191条】")
+    assert [c["article_no"] for c in citations] == ["第五十条", "第一百九十一条"]
+
+
+def test_extract_citations_whole_law(db):
+    citations = _extract_citations(db, "【证券法·全文】")
+    assert len(citations) == 1
+    assert citations[0]["law_id"] is not None
+    assert citations[0]["article_id"] is None
+    assert citations[0]["article_no"] == "全文"
+
+
+def test_extract_citations_matches_explicit_modification_decision(db):
+    cur = db.execute(
+        "INSERT INTO laws(title, level, content_hash) VALUES(?,?,?)",
+        ("【证监会令第144号】关于修改《证券发行与承销管理办法》的决定",
+         "部门规章", "h144"))
+    db.execute(
+        "INSERT INTO articles(law_id, article_no, text) VALUES(?,?,?)",
+        (cur.lastrowid, "第十三条", "修改后的内容。"))
+    db.commit()
+    citations = _extract_citations(
+        db, "【关于修改《证券发行与承销管理办法》的决定（证监会令第144号）·第十三条】")
+    assert len(citations) == 1
+    assert citations[0]["law_id"] is not None
+
+
+def test_extract_citations_rejects_modified_original(db):
+    cur = db.execute(
+        "INSERT INTO laws(title, level, content_hash) VALUES(?,?,?)",
+        ("【证监会令第144号】关于修改《证券发行与承销管理办法》的决定",
+         "部门规章", "h144"))
+    db.execute(
+        "INSERT INTO articles(law_id, article_no, text) VALUES(?,?,?)",
+        (cur.lastrowid, "第十三条", "修改后的内容。"))
+    db.commit()
+    # 库内只有修改决定、没有原办法全文时，不应把原办法引用错误指向修改决定
+    citations = _extract_citations(db, "【证券发行与承销管理办法·第十三条】")
+    assert len(citations) == 1
+    assert citations[0]["law_id"] is None
 
 
 def test_extract_citations_excludes_duplicate_law(db):
