@@ -77,9 +77,9 @@ function layoutGraph(nodes) {
   return maxR;
 }
 
-async function showGraph() {
+async function showGraph(route, ticket) {
   showView("viewGraph");
-  if (G) { drawGraph(); return; }  // 已加载过：只重绘
+  if (G) { resizeCanvas(); drawGraph(); return; }  // 缓存重进先恢复隐藏前的画布尺寸
   const meta = $("graphMeta");
   meta.textContent = "加载图谱数据…";
   try {
@@ -87,6 +87,7 @@ async function showGraph() {
       if (!r.ok) throw `HTTP ${r.status}`;
       return r.json();
     });
+    if (typeof routeSerial !== "undefined" && ticket !== routeSerial) return;
     G = {
       nodes: data.nodes, edges: data.edges,
       byId: new Map(data.nodes.map(n => [n.id, n])),
@@ -106,6 +107,7 @@ async function showGraph() {
     updateGraphMeta();
     drawGraph();
   } catch (e) {
+    if (typeof routeSerial !== "undefined" && ticket !== routeSerial) return;
     meta.textContent = `图谱加载失败：${String(e)}`;
   }
 }
@@ -176,9 +178,11 @@ function setupCanvas() {
 }
 
 function resizeCanvas() {
+  const width = gCanvas.clientWidth, height = gCanvas.clientHeight;
+  if (!width || !height) return;
   const dpr = window.devicePixelRatio || 1;
-  gCanvas.width = gCanvas.clientWidth * dpr;
-  gCanvas.height = gCanvas.clientHeight * dpr;
+  gCanvas.width = width * dpr;
+  gCanvas.height = height * dpr;
   gCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
@@ -371,15 +375,14 @@ function bindCanvasEvents() {
     if (moved) return;  // 拖拽后的 mouseup 不触发跳转
     const rect = gCanvas.getBoundingClientRect();
     const n = hitNode(e.clientX - rect.left, e.clientY - rect.top);
-    if (n && typeof loadLawDetail === "function") {
+    if (n && typeof navigate === "function" && typeof makeHash === "function") {
       document.getElementById("graphTip").classList.add("hidden");
-      loadLawDetail(n.id);   // app.js 的全局函数：进入法规详情
+      navigate(makeHash("/law/" + n.id));
     }
   });
 }
 
-/* 导航入口（graph.js 自包含，不依赖 app.js 加载顺序） */
-document.getElementById("navGraph").addEventListener("click", e => {
-  e.preventDefault();
-  showGraph();
-});
+/* 路由处理器由 app.js 注册，图谱只负责 Canvas 数据与交互。 */
+if (typeof registerRouteHandler === "function") {
+  registerRouteHandler("graph", showGraph);
+}

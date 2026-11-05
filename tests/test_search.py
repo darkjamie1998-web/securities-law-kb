@@ -3,8 +3,38 @@ import json
 
 import pytest
 
+import app.search as search
 from app.db import get_db, init_db
 from app.search import hybrid_search, _rrf
+from app.seg_index import rebuild_all
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("第1条", "第一条"),
+    ("第101条", "第一百零一条"),
+    ("第1001条", "第一千零一条"),
+    ("第9999条", "第九千九百九十九条"),
+    ("第十九条之一", "第十九条之一"),
+    ("第19条之2", "第十九条之二"),
+    ("第19条之十", "第十九条之十"),
+    ("第19条之2（经修改）", "第十九条之二"),
+])
+def test_normalize_article_no_preserves_compound_suffix(raw, expected):
+    assert search.normalize_article_no(raw) == expected
+
+
+@pytest.mark.parametrize("raw", [
+    "第0条", "第10000条", "第19十一条", "第十九条之1一",
+    "第一一十九条", "第十九条之零", "第十九条之三非法",
+])
+def test_normalize_article_no_does_not_guess_invalid_numbers(raw):
+    assert search.normalize_article_no(raw) == raw
+
+
+def test_parse_citation_rejects_out_of_range_without_crashing():
+    assert search.parse_citation("证券法第10000条") is None
+    raw = "第" + "9" * 5000 + "条"
+    assert search.normalize_article_no(raw) == raw
 
 
 @pytest.fixture()
@@ -157,3 +187,234 @@ def test_vector_road_used_when_embedding_stored(db):
     results = hybrid_search(db, MockLLM(), "完全无关的查询词xyz", top_k=5)
     ids = [r["article_no"] for r in results]
     assert "第五十条" in ids  # 向量路命中
+
+
+@pytest.fixture()
+def paged_db(tmp_path):
+    conn = get_db(tmp_path / "paged.db")
+    init_db(conn)
+    for i in range(6):
+        cur = conn.execute(
+            """INSERT INTO laws(title, level, status, source_name, topic_tags,
+               content_hash) VALUES(?,?,?,?,?,?)""",
+            (f"监管规定{i}", "法律" if i == 0 else "行政法规",
+             "现行有效" if i == 0 else "已修订",
+             "证监会" if i == 0 else "上交所",
+             "发行， 上市" if i == 0 else "交易", f"page-{i}"),
+        )
+        conn.execute(
+            "INSERT INTO articles(law_id, article_no, text) VALUES(?,?,?)",
+            (cur.lastrowid, "第一条", f"证券发行监管第{i}项规则，明确发行要求。"),
+        )
+    first_law_id = conn.execute(
+        "SELECT id FROM laws WHERE title='监管规定0'").fetchone()[0]
+    for title, flags in [
+        ("重复监管规定", {"duplicate_of": first_law_id, "quality_flag": "duplicate"}),
+        ("空监管规定", {"quality_flag": "empty_text"}),
+        ("旧版监管规定", {"superseded_by": first_law_id, "status": "已修订"}),
+    ]:
+        cur = conn.execute(
+            """INSERT INTO laws(title, level, content_hash, duplicate_of,
+               superseded_by, quality_flag, status) VALUES(?,?,?,?,?,?,?)""",
+            (title, "法律", f"excluded-{title}", flags.get("duplicate_of"),
+             flags.get("superseded_by"), flags.get("quality_flag"),
+             flags.get("status", "现行有效")),
+        )
+        conn.execute(
+            "INSERT INTO articles(law_id, article_no, text) VALUES(?,?,?)",
+            (cur.lastrowid, "第一条", "证券发行监管规则，明确发行要求。"),
+        )
+    conn.commit()
+    rebuild_all(conn)
+    return conn
+
+
+def test_search_page_reports_all_filtered_candidates_and_real_pages(paged_db):
+    first = search.hybrid_search_page(
+        paged_db, None, "证券发行监管", page=1, page_size=2)
+    second = search.hybrid_search_page(
+        paged_db, None, "证券发行监管", page=2, page_size=2)
+
+    assert first["total"] == 6  # 重复、空数据与旧版候选不计入 total
+    assert first["page"] == 1 and first["page_size"] == 2
+    assert len(first["results"]) == 2 and first["has_more"] is True
+    assert first["mode"] == "keyword"
+    assert second["total"] == 6 and len(second["results"]) == 2
+    assert {r["id"] for r in first["results"]}.isdisjoint(
+        r["id"] for r in second["results"])
+
+    empty = search.hybrid_search_page(
+        paged_db, None, "证券发行监管", page=4, page_size=2)
+    assert empty["total"] == 6
+    assert empty["results"] == [] and empty["has_more"] is False
+
+
+def test_search_page_combines_all_law_filters(paged_db):
+    law_id = paged_db.execute(
+        "SELECT id FROM laws WHERE title='监管规定0'").fetchone()[0]
+    filters = {
+        "level": "法律", "status": "现行有效", "source": "证监会",
+        "topic": " 上市 ", "law_id": law_id,
+    }
+    matched = search.hybrid_search_page(
+        paged_db, None, "证券发行监管", filters=filters)
+    assert matched["total"] == 1
+    assert [r["law_id"] for r in matched["results"]] == [law_id]
+
+    for key, value in [
+        ("level", "行政法规"), ("status", "已修订"),
+        ("source", "证监会北京监管局"), ("topic", "上市委"),
+        ("law_id", law_id + 999),
+    ]:
+        mismatched = dict(filters)
+        mismatched[key] = value
+        assert search.hybrid_search_page(
+            paged_db, None, "证券发行监管", filters=mismatched)["total"] == 0
+
+    blank_topic = dict(filters, topic=" \t\n\r　")
+    assert search.hybrid_search_page(
+        paged_db, None, "证券发行监管", filters=blank_topic)["total"] == 0
+
+
+def test_exact_article_uses_same_filters_and_stays_first(db):
+    law_id = db.execute(
+        "SELECT id FROM laws WHERE title='中华人民共和国证券法'").fetchone()[0]
+    db.execute(
+        "UPDATE laws SET source_name='证监会', topic_tags='发行，上市' WHERE id=?",
+        (law_id,))
+    db.commit()
+    filters = {
+        "level": "法律", "status": "现行有效", "source": "证监会",
+        "topic": "上市", "law_id": law_id,
+    }
+    page = search.hybrid_search_page(
+        db, None, "证券法第五十条", filters=filters)
+    assert page["total"] >= 1
+    assert page["results"][0]["article_no"] == "第五十条"
+    assert page["results"][0]["match_type"] == "exact_article"
+    assert page["results"][0]["match_reasons"][0] == "exact_article"
+
+    for key, value in [
+        ("level", "行政法规"), ("status", "已修订"),
+        ("source", "上交所"), ("topic", "交易"), ("law_id", law_id + 999),
+    ]:
+        mismatched = dict(filters)
+        mismatched[key] = value
+        assert search.hybrid_search_page(
+            db, None, "证券法第五十条", filters=mismatched)["total"] == 0
+
+
+def test_snippet_centers_earliest_real_hit_and_lists_highlight_terms(db):
+    cur = db.execute(
+        "INSERT INTO articles(law_id, article_no, text) VALUES(?,?,?)",
+        (db.execute("SELECT id FROM laws").fetchone()[0], "第二百条",
+         "前" * 300 + "内幕交易" + "后" * 300),
+    )
+    db.commit()
+    rebuild_all(db)
+    article_id = cur.lastrowid
+
+    page = search.hybrid_search_page(db, None, "内幕交易", page_size=10)
+    result = next(r for r in page["results"] if r["id"] == article_id)
+    assert len(result["snippet"]) <= 260
+    assert 80 <= result["snippet"].index("内幕交易") <= 150
+    assert "内幕交易" in result["highlight_terms"]
+    assert len(result["highlight_terms"]) == len(set(result["highlight_terms"]))
+    assert result["highlight_terms"] == sorted(
+        result["highlight_terms"], key=len, reverse=True)
+    assert {"segment", "keyword"}.issubset(result["match_reasons"])
+
+
+def test_page_reports_vector_reason_and_hybrid_mode_only_when_used(db):
+    page = search.hybrid_search_page(
+        db, MockLLM(), "完全无关的查询词xyz", page_size=5)
+    assert page["mode"] == "hybrid"
+    assert page["results"]
+    assert all(r["match_reasons"] == ["vector"] for r in page["results"])
+
+    class BrokenLLM:
+        embedding_model = "mock-embed"
+
+        def embed(self, texts, batch=64):
+            raise RuntimeError("no api")
+
+    degraded = search.hybrid_search_page(
+        db, BrokenLLM(), "证券发行", page_size=5)
+    assert degraded["mode"] == "keyword"
+    assert all("vector" not in r["match_reasons"] for r in degraded["results"])
+
+
+def test_legacy_search_wraps_first_page_and_defends_bad_paging(db):
+    paged = search.hybrid_search_page(
+        db, None, "内幕交易", page=1, page_size=1,
+        filters={"level": "法律"})
+    assert hybrid_search(
+        db, None, "内幕交易", top_k=1, filters={"level": "法律"}
+    ) == paged["results"]
+
+    defended = search.hybrid_search_page(
+        db, None, "内幕交易", page=0, page_size=0)
+    assert defended["page"] == 1 and defended["page_size"] == 1
+    assert len(defended["results"]) == 1
+
+
+@pytest.fixture()
+def vector_page_db(tmp_path):
+    """高 ID 的排除项占据向量前列，top50 截断会错误缩小有效 total。"""
+    conn = get_db(tmp_path / "vector-page.db")
+    init_db(conn)
+    first_law_id = None
+    for i in range(67):  # 55 部有效 + 6 部重复 + 6 部旧版
+        duplicate_of = first_law_id if 55 <= i < 61 else None
+        superseded_by = first_law_id if i >= 61 else None
+        title = (f"向量法规{i}" if i < 55 else
+                 f"重复向量法规{i}" if i < 61 else f"旧版向量法规{i}")
+        cur = conn.execute(
+            """INSERT INTO laws(title, level, content_hash, duplicate_of,
+               superseded_by, quality_flag) VALUES(?,?,?,?,?,?)""",
+            (title, "法律", f"vector-{i}", duplicate_of, superseded_by,
+             "duplicate" if duplicate_of else None),
+        )
+        if i == 0:
+            first_law_id = cur.lastrowid
+        conn.execute(
+            "INSERT INTO articles(law_id, article_no, text, embedding) "
+            "VALUES(?,?,?,?)",
+            (cur.lastrowid, "第一条", f"向量候选正文{i}", json.dumps([1.0, 0.0])),
+        )
+    conn.commit()
+    return conn
+
+
+def test_vector_page_total_is_not_truncated_by_excluded_top_candidates(vector_page_db):
+    page = search.hybrid_search_page(
+        vector_page_db, MockLLM(), "内幕", page=1, page_size=10)
+    assert page["mode"] == "hybrid"
+    assert page["total"] == 55
+    assert len(page["results"]) == 10 and page["has_more"] is True
+
+    last = search.hybrid_search_page(
+        vector_page_db, MockLLM(), "内幕", page=6, page_size=10)
+    assert last["total"] == 55
+    assert len(last["results"]) == 5 and last["has_more"] is False
+    assert all(r["match_reasons"] == ["vector"] for r in last["results"])
+
+
+def test_search_page_loads_text_only_for_current_page(vector_page_db):
+    statements = []
+    vector_page_db.set_trace_callback(statements.append)
+    page = search.hybrid_search_page(
+        vector_page_db, MockLLM(), "内幕", page=2, page_size=3)
+    vector_page_db.set_trace_callback(None)
+
+    assert page["total"] == 55 and len(page["results"]) == 3
+    candidate_queries = [
+        " ".join(sql.split()) for sql in statements
+        if "FROM articles a JOIN laws l" in sql
+    ]
+    assert len(candidate_queries) == 2
+    filter_query, text_query = candidate_queries
+    assert "a.text" not in filter_query
+    assert "a.text" in text_query
+    expected_ids = ",".join(str(r["id"]) for r in page["results"])
+    assert f"a.id IN ({expected_ids})" in text_query  # trace 会展开绑定参数

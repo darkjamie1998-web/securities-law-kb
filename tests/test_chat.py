@@ -1,6 +1,9 @@
 # tests/test_chat.py — Agent 对话循环测试（mock LLM，不联网）
+import threading
+
 import pytest
 
+import app.chat as chat_module
 from app.chat import agent_chat, _extract_citations, SYSTEM_PROMPT
 from app.db import get_db, init_db
 
@@ -77,6 +80,85 @@ def test_agent_loop_stops_at_max_rounds(db):
     assert r["rounds"] == 3
 
 
+def test_agent_chat_emits_ordered_progress_events(db):
+    events = []
+    llm = ScriptedLLM([TOOL_MSG, FINAL_MSG])
+
+    agent_chat(db, llm, [{"role": "user", "content": "内幕交易"}],
+               progress=events.append)
+
+    assert events == [
+        {"type": "stage", "stage": "thinking", "round": 1},
+        {"type": "stage", "stage": "model_done", "round": 1},
+        {"type": "stage", "stage": "searching", "round": 1,
+         "query": "内幕交易 禁止"},
+        {"type": "stage", "stage": "search_done", "round": 1,
+         "query": "内幕交易 禁止"},
+        {"type": "stage", "stage": "thinking", "round": 2},
+        {"type": "stage", "stage": "model_done", "round": 2},
+        {"type": "stage", "stage": "citing", "round": 2},
+    ]
+
+
+def test_cancel_after_tool_prevents_next_llm_call(db, monkeypatch):
+    cancel_event = threading.Event()
+
+    def cancel_after_search(*args, **kwargs):
+        cancel_event.set()
+        return []
+
+    monkeypatch.setattr(chat_module, "hybrid_search", cancel_after_search)
+    llm = ScriptedLLM([TOOL_MSG, FINAL_MSG])
+
+    with pytest.raises(chat_module.ChatCancelled):
+        agent_chat(db, llm, [{"role": "user", "content": "内幕交易"}],
+                   cancel_event=cancel_event)
+
+    assert llm.calls == 1
+
+
+def test_law_id_scopes_search_and_model_context(db, monkeypatch):
+    captured = {"filters": [], "messages": []}
+
+    def fake_search(db, llm, query, top_k=10, filters=None):
+        captured["filters"].append(filters)
+        return []
+
+    class CaptureLLM(ScriptedLLM):
+        def chat(self, messages, tools=None, **kw):
+            captured["messages"].append([dict(m) for m in messages])
+            return super().chat(messages, tools, **kw)
+
+    monkeypatch.setattr(chat_module, "hybrid_search", fake_search)
+    llm = CaptureLLM([TOOL_MSG, FINAL_MSG])
+    result = agent_chat(db, llm, [{"role": "user", "content": "问题"}], law_id=7)
+
+    assert captured["filters"] == [{"law_id": 7}]
+    assert result["scope"] == {"law_id": 7}
+    scoped_context = captured["messages"][0][1]
+    assert scoped_context["role"] == "system"
+    assert "law_id=7" in scoped_context["content"]
+    assert "不得" in scoped_context["content"]
+    assert "全库" in scoped_context["content"]
+
+    unscoped_llm = CaptureLLM([TOOL_MSG, FINAL_MSG])
+    unscoped = agent_chat(db, unscoped_llm, [{"role": "user", "content": "问题"}])
+    assert captured["filters"][-1] is None
+    assert unscoped["scope"] == {"law_id": None}
+    assert len(captured["messages"][-2]) == 2  # system + user，不追加限定上下文
+
+
+def test_legacy_positional_max_rounds_and_result_fields(db):
+    llm = ScriptedLLM([FINAL_MSG])
+
+    result = agent_chat(db, llm, [{"role": "user", "content": "问题"}], 1)
+
+    assert result["content"] == FINAL_MSG["content"]
+    assert result["searches"] == [] and result["rounds"] == 1
+    assert len(result["citations"]) == 1
+    assert result["scope"] == {"law_id": None}
+
+
 def test_tool_result_fed_back(db):
     """工具执行结果必须作为 tool 消息回填给 LLM。"""
     captured = {}
@@ -108,6 +190,31 @@ def test_extract_citations_includes_source_url(db):
 def test_extract_citations_normalizes_arabic_article_no(db):
     citations = _extract_citations(db, "【证券法·第50条】")
     assert citations and citations[0]["article_no"] == "第五十条"
+
+
+def test_extract_citations_matches_compound_and_arabic_stored_articles(db):
+    law_id = db.execute("SELECT id FROM laws").fetchone()[0]
+    for no in ("第五十条之一", "第50条之二"):
+        db.execute(
+            "INSERT INTO articles(law_id, article_no, text) VALUES(?,?,?)",
+            (law_id, no, "复合条号正文。"))
+    db.commit()
+
+    citations = _extract_citations(
+        db, "【证券法·第50条之1；证券法·第50条之二；证券法·第50条（说明）】")
+
+    assert [c["article_no"] for c in citations] == [
+        "第五十条之一", "第五十条之二", "第五十条"]
+    assert all(c["article_id"] is not None for c in citations)
+    assert len({c["article_id"] for c in citations}) == 3
+
+
+def test_extract_citations_compound_never_falls_back_to_base_article(db):
+    citations = _extract_citations(db, "【证券法·第50条之3】")
+    assert len(citations) == 1
+    assert citations[0]["law_id"] is not None
+    assert citations[0]["article_id"] is None
+    assert citations[0]["article_no"] == "第五十条之三"
 
 
 def test_extract_citations_title_with_doc_number(db):

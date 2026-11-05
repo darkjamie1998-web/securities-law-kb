@@ -34,6 +34,25 @@ SYSTEM_PROMPT = """你是证券法律法规研究专家。回答用户关于证�
 MAX_ROUNDS = 5
 
 
+class ChatCancelled(Exception):
+    """客户端或调用方请求协作取消对话。"""
+
+
+def _check_cancelled(cancel_event) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise ChatCancelled("对话已取消")
+
+
+def _emit_progress(progress, stage: str, round_no: int,
+                   query: str | None = None) -> None:
+    if progress is None:
+        return
+    event = {"type": "stage", "stage": stage, "round": round_no}
+    if query is not None:
+        event["query"] = query
+    progress(event)
+
+
 def _safe_top_k(v) -> int:
     try:
         n = int(v)
@@ -42,10 +61,12 @@ def _safe_top_k(v) -> int:
     return max(1, min(50, n))
 
 
-def _run_tool(db, llm, args: dict) -> str:
+def _run_tool(db, llm, args: dict, law_id: int | None = None) -> str:
     """执行 search_laws，返回压缩后的检索结果文本。"""
     query = args.get("query") if isinstance(args.get("query"), str) else ""
-    results = hybrid_search(db, llm, query, top_k=_safe_top_k(args.get("top_k", 8)))
+    filters = {"law_id": law_id} if law_id is not None else None
+    results = hybrid_search(
+        db, llm, query, top_k=_safe_top_k(args.get("top_k", 8)), filters=filters)
     if not results:
         return "（未检索到相关法条）"
     lines = []
@@ -56,36 +77,56 @@ def _run_tool(db, llm, args: dict) -> str:
     return "\n\n".join(lines)
 
 
-def agent_chat(db, llm, messages: list[dict], max_rounds: int = MAX_ROUNDS) -> dict:
+def agent_chat(db, llm, messages: list[dict], max_rounds: int = MAX_ROUNDS,
+               progress=None, cancel_event=None, law_id: int | None = None) -> dict:
     """Agent 循环：LLM 决定是否检索 → 执行 → 回填 → 继续或终止。
 
-    返回 {"content": 最终回答, "citations": 引用列表,
-          "searches": [每次检索词], "rounds": 实际轮数}
+    取消是协作式的：在模型/检索等阻塞调用前后及工具之间检查，
+    不会中断正在执行的 LLM HTTP 请求。max_rounds 保持旧位置参数兼容。
     """
     # 输入防御：只保留 dict 消息、最近 40 条、单条 8k 字，避免超长上下文烧 token
     clean = [dict(m) for m in messages if isinstance(m, dict)][-40:]
     for m in clean:
         if isinstance(m.get("content"), str) and len(m["content"]) > 8000:
             m["content"] = m["content"][:8000]
-    convo = [{"role": "system", "content": SYSTEM_PROMPT}] + clean
+    convo = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if law_id is not None:
+        convo.append({
+            "role": "system",
+            "content": (
+                f"本轮仅依据 law_id={law_id} 的指定法规检索和作答，"
+                "不得放宽到全库，也不得引用其他法规；未检索到相关规定时请明确说明。"
+            ),
+        })
+    convo.extend(clean)
     searches: list[str] = []
-    citations: list[dict] = []
     rounds = 0
 
+    def finish(content: str) -> dict:
+        _check_cancelled(cancel_event)
+        _emit_progress(progress, "citing", rounds)
+        citations = _extract_citations(db, content)
+        _check_cancelled(cancel_event)
+        return {"content": content, "citations": citations,
+                "searches": searches, "rounds": rounds,
+                "scope": {"law_id": law_id}}
+
     while rounds < max_rounds:
+        _check_cancelled(cancel_event)
         rounds += 1
+        _emit_progress(progress, "thinking", rounds)
         msg = llm.chat(convo, tools=TOOLS)
+        _emit_progress(progress, "model_done", rounds)
+        _check_cancelled(cancel_event)
         tool_calls = msg.get("tool_calls") or []
 
         if not tool_calls:
-            content = msg.get("content") or ""
-            citations = _extract_citations(db, content)
-            return {"content": content, "citations": citations,
-                    "searches": searches, "rounds": rounds}
+            return finish(msg.get("content") or "")
 
         # 有工具调用：执行并回填（对网关/模型返回结构做防御）
         convo.append(msg)
         for idx, tc in enumerate(tool_calls):
+            _check_cancelled(cancel_event)
             fn = tc.get("function") if isinstance(tc, dict) else None
             if not isinstance(fn, dict):
                 continue
@@ -99,7 +140,11 @@ def agent_chat(db, llm, messages: list[dict], max_rounds: int = MAX_ROUNDS) -> d
                     args = {}
                 q = args.get("query") if isinstance(args.get("query"), str) else ""
                 searches.append(q)  # 与 _run_tool 用同一规范化值
-                output = _run_tool(db, llm, args)
+                _emit_progress(progress, "searching", rounds, q)
+                _check_cancelled(cancel_event)
+                output = _run_tool(db, llm, args, law_id=law_id)
+                _emit_progress(progress, "search_done", rounds, q)
+                _check_cancelled(cancel_event)
             else:
                 output = f"未知工具：{name}"
             convo.append({
@@ -110,17 +155,21 @@ def agent_chat(db, llm, messages: list[dict], max_rounds: int = MAX_ROUNDS) -> d
 
     # 轮数用尽：强制收尾（不再给工具）
     convo.append({"role": "user", "content": "（请基于已检索到的信息直接回答，不要再调用工具）"})
+    _check_cancelled(cancel_event)
+    _emit_progress(progress, "thinking", rounds)
     final = llm.chat(convo)
-    content = final.get("content") or ""
-    return {"content": content, "citations": _extract_citations(db, content),
-            "searches": searches, "rounds": rounds}
+    _emit_progress(progress, "model_done", rounds)
+    _check_cancelled(cancel_event)
+    return finish(final.get("content") or "")
 
 
 # 一个【】里可能放多个引用（用；分隔），例如：
 # 【证监会令第227号·第七十条；证监会令第166号·第四十条】
 CITATION_BLOCK_RE = re.compile(r"【([^】]+)】")
 CITATION_ITEM_RE = re.compile(r"^(.+?)·(.+)$")
-ARTICLE_NO_RE = re.compile(r"第[一二三四五六七八九十百千零〇\d]+条")
+ARTICLE_NO_RE = re.compile(
+    r"第[一二三四五六七八九十百千零〇\d]+条"
+    r"(?:之[一二三四五六七八九十百千零〇\d]+)?")
 
 
 _ALIASES = (
@@ -250,6 +299,12 @@ def _lookup_citation(db, title: str, article_no: str) -> dict:
     art = db.execute(
         "SELECT id FROM articles WHERE law_id=? AND article_no=?",
         (law["id"], no)).fetchone()
+    if art is None:
+        # 历史数据可能保存阿拉伯条号；只在当前法规内做完整条号的规范比较。
+        candidates = db.execute(
+            "SELECT id, article_no FROM articles WHERE law_id=?", (law["id"],))
+        art = next((row for row in candidates
+                    if normalize_article_no(row["article_no"]) == no), None)
     if art:
         item["article_id"] = art["id"]
         item["article_no"] = no
