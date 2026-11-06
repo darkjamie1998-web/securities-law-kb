@@ -13,8 +13,23 @@ echo.
 set PY=
 if exist "runtime\python.exe" set PY=runtime\python.exe
 if exist ".venv\Scripts\python.exe" set PY=.venv\Scripts\python.exe
-if not "%PY%"=="" goto checks
+if "%PY%"=="" goto noruntime
 
+REM sanity: interpreter must actually run; venv breaks when base python is removed/moved
+"%PY%" -c "pass" >NUL 2>NUL
+if not errorlevel 1 goto checks
+
+echo [提示] 检测到 %PY% 但无法运行（其基础 Python 可能已卸载或移动）
+if "%PY%"=="runtime\python.exe" goto broken_runtime
+echo [提示] 删除损坏的 .venv 并自动重新配置...
+rmdir /s /q ".venv"
+goto detect
+
+:broken_runtime
+echo [失败] 便携版 runtime\ 已损坏，请从便携包 zip 重新解压完整 runtime\ 目录
+goto fail
+
+:noruntime
 echo [提示] 未找到本地运行时（runtime\ 或 .venv\），尝试自动配置...
 echo.
 set SETUP=

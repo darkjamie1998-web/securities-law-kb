@@ -14,8 +14,14 @@ echo.
 set PY=.venv\Scripts\python.exe
 if exist "runtime\python.exe" set PY=runtime\python.exe
 
-if not exist "%PY%" (
-    echo [提示] 未找到本地运行时，转入环境自检/自动配置...
+REM sanity: interpreter must actually run, not merely exist (broken venv after base python removal)
+set PYOK=
+if exist "%PY%" (
+    "%PY%" -c "pass" >NUL 2>NUL
+    if not errorlevel 1 set PYOK=1
+)
+if not defined PYOK (
+    echo [提示] 本地运行时缺失或无法运行，转入环境自检/自动配置...
     echo.
     call "环境自检.bat"
 )
@@ -24,7 +30,12 @@ REM re-detect after autocfg (env may now have .venv)
 set PY=.venv\Scripts\python.exe
 if exist "runtime\python.exe" set PY=runtime\python.exe
 
-if not exist "%PY%" (
+set PYOK=
+if exist "%PY%" (
+    "%PY%" -c "pass" >NUL 2>NUL
+    if not errorlevel 1 set PYOK=1
+)
+if not defined PYOK (
     echo [错误] 环境仍未就绪，请按上方自检提示处理后重新双击本脚本
     pause
     exit /b 1

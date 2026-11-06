@@ -3,6 +3,7 @@
 # 用法: python tools/setup_env.py [--mirror <pip镜像URL>]
 # 前提: 当前解释器 Python >= 3.9（本脚本只用标准库）
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -41,8 +42,17 @@ def main():
 
     print(f"\n[2/4] 创建虚拟环境 .venv（位于项目文件夹内，不动系统）")
     if VENV_PY.exists():
-        print("      .venv 已存在，复用（如需重建请先手动删除 .venv 目录）")
-    else:
+        # .venv 可能已损坏（其基准 Python 被卸载/移动后 python.exe 无法运行），需重建
+        probe = subprocess.run(
+            [str(VENV_PY), "-c", "pass"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ).returncode
+        if probe == 0:
+            print("      .venv 已存在且可用，复用（如需重建请先手动删除 .venv 目录）")
+        else:
+            print("      检测到 .venv 已损坏（基准 Python 缺失），删除后重建")
+            shutil.rmtree(ROOT / ".venv")
+    if not VENV_PY.exists():
         code = run([sys.executable, "-m", "venv", ROOT / ".venv"])
         if code != 0 or not VENV_PY.exists():
             print("\n[失败] venv 创建失败，请把上方报错发给维护者")
